@@ -1,0 +1,312 @@
+#+TITLE: cavemacs — caveman (skill) integration plan
+#+AUTHOR: Spencer Harmon
+#+STARTUP: overview
+#+OPTIONS: toc:2 num:nil
+
+This plan covers integrating the [[https://github.com/JuliusBrussee/caveman][caveman]] skill — the
+output-compression layer ("why use many token when few do trick") —
+into cavemacs.  It is the sibling of =cavekit-mode= and =cavemem=
+integration that already lives in =cavemacs-cavekit.el= and
+=cavemacs-cavemem.el=.
+
+* Background
+
+caveman is a tiny installer + skill ruleset that tells the agent to
+talk like a caveman: drop filler words, keep fragments, preserve
+technical content byte-for-byte.  Reported ~65% reduction in output
+tokens with no loss of accuracy.  It ships as:
+
+- A *skill* file (=SKILL.md=) the agent's runtime auto-loads.
+- A *trigger* phrase (=/caveman=) or an *auto-activate flag file*
+  that the agent reads at session start.
+- A handful of *companion slash commands* (=/caveman-commit=,
+  =/caveman-review=, =/caveman-stats=, =/caveman-compress=).
+- *Levels*: =lite= | =full= | =ultra= | =wenyan= — pick how much
+  grunt.
+
+For caveman-code (our backend), the skill installer drops the file
+under caveman's skill discovery path (=~/.cave/skills/= or a
+project-local =.cave/skills/=), and caveman's existing
+=--skill <path>= / =--no-skills= flags already do the rest.
+
+So: the bulk of the integration is *control surface*, not
+re-implementation.  cavemacs needs to (a) make the caveman skill
+discoverable and toggleable, (b) provide one-shot install / status
+introspection, (c) wire the companion slash commands into the
+discovered-commands flow, and (d) reflect "caveman is on" in the
+pretty header-line.
+
+* Scope of integration
+
+What we DO want:
+
+1. *Detection & status.*  Know whether the caveman skill is
+   installed for this session's caveman-code (project-local OR
+   global), and at what level.
+2. *Activation toggle.*  A single command (=cavemacs-caveman-toggle=)
+   that flips between caveman-on / caveman-off for the *current*
+   session.  Off the bat: send =/caveman= or =normal mode= as the
+   appropriate command — both are documented triggers.
+3. *Level picker.*  =cavemacs-caveman-set-level= to switch between
+   =lite/full/ultra/wenyan=.
+4. *One-shot installer.*  =cavemacs-caveman-install= runs caveman's
+   installer scoped to caveman-code only.  Equivalent of:
+
+   #+begin_src bash
+   curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh \
+     | bash -s -- --only caveman-code
+   #+end_src
+
+   ...wrapped behind a confirmation prompt and a defcustom for
+   alternative install sources (local clone, offline).
+5. *Companion commands.*  =/caveman-stats=, =/caveman-commit=,
+   =/caveman-review=, =/caveman-compress <file>= flow through
+   =cavemacs-commands-dispatch= the same way the existing cavekit/
+   cavemem commands do.  Most of these are already user-defined
+   slash commands caveman-code's RPC =prompt= handler dispatches
+   for free; cavemacs's job is just to *expose* them in the
+   completion list and write a small wrapper for any that need
+   editor-side behaviour (e.g. =/caveman-stats= benefits from
+   rendering its output as a small overlay rather than inline
+   chat).
+6. *Header-line indicator.*  When caveman is active, show
+   =⛏ caveman:full= (or whichever level) on the pretty
+   header-line, between the model and the cost.  Click cycles.
+7. *Customs.*  =cavemacs-caveman-default-level=,
+   =cavemacs-caveman-auto-enable= (on/off/per-project),
+   =cavemacs-caveman-install-source= (URL / local path / nil to
+   disable installer entirely).
+
+What we explicitly do NOT want:
+
+- *Re-implementing the skill's rules in elisp.*  The skill is a
+  caveman-code skill; caveman-code already knows how to load and
+  enforce it.  Our job is plumbing.
+- *Re-implementing the statusline savings counter ourselves.*  The
+  caveman installer ships a statusline integration for Claude Code
+  specifically.  For caveman-code we read whatever
+  =/caveman-stats= returns over RPC and surface it in our own
+  header line.  No file-watching, no log-tailing.
+- *Auto-installing on every cavemacs launch.*  The installer is an
+  explicit user action.  We *detect* whether it's installed and
+  *prompt* to install if not (with a "don't ask again" affordance);
+  we don't silently `curl | bash`.
+- *Bundling the caveman skill in our repo.*  Upstream owns it.
+  We discover it where it lives.
+
+* Module layout
+
+Add =cavemacs-caveman.el= as a peer of =cavemacs-cavekit.el= and
+=cavemacs-cavemem.el=.  Required from =cavemacs.el= after the
+existing companion modules.
+
+Dependency direction:
+
+#+begin_src
+cavemacs-caveman.el
+  -> cavemacs-config   (for the installer's binary lookup helper)
+  -> cavemacs-rpc      (RPC sends for /caveman level toggles)
+  -> cavemacs-render   (notice helper for inline confirmations)
+  -> cavemacs-pretty   (header-line state update)
+  -> cavemacs-commands (companion command registration)
+#+end_src
+
+No cycles; same pattern as cavekit/cavemem.
+
+* Detection algorithm
+
+In rough Lisp pseudocode:
+
+#+begin_src elisp
+(defun cavemacs-caveman--installed-p ()
+  "Return one of :project, :global, or nil.
+
+Checks for caveman's SKILL.md in caveman-code's skill discovery
+paths, in priority order:
+
+  1. <project-root>/.cave/skills/caveman/SKILL.md   -> :project
+  2. ~/.cave/skills/caveman/SKILL.md                -> :global
+
+Returns nil if neither is present."
+  ...)
+#+end_src
+
+(Or equivalent if caveman-code uses a different skill path on this
+machine — the install matrix in caveman/INSTALL.md is authoritative.)
+
+* Activation toggle (RPC vs. prompt-text)
+
+Two viable mechanisms:
+
+** A. Send =/caveman= as a prompt
+
+The skill's documented trigger is the literal text =/caveman= (or
+=talk like caveman=).  cavemacs already passes unknown slash
+commands through to caveman-code's RPC =prompt= handler, which
+dispatches user-installed slash commands.  So:
+
+#+begin_src elisp
+(cavemacs-rpc-send conn "prompt" :message "/caveman full")
+#+end_src
+
+This is the safest baseline because it goes through the same
+codepath the skill is documented against.
+
+** B. Use the auto-activate flag file
+
+The README says Claude Code has a hook that writes a flag file
+each session; caveman-code might have an equivalent.  If so, we
+could write that flag file directly from cavemacs and skip the
+prompt round-trip.  Investigate before implementing — keep A as
+the fallback.
+
+* Toggle UI
+
+#+begin_src
+M-x cavemacs-caveman             ; dispatch to toggle / level / install
+C-c C-o c                        ; cavemacs-flags transient entry
+#+end_src
+
+Add to the existing =cavemacs-flags= transient (=C-c C-o=):
+
+#+begin_src
+ Caveman skill
+   c   toggle caveman   [off | full]
+   C   pick level       (lite/full/ultra/wenyan)
+   I   install...
+   S   /caveman-stats
+#+end_src
+
+* Companion commands wiring
+
+Register these with =cavemacs-commands--builtins= so they appear
+in the CAPF completion list with a docstring, even when caveman
+hasn't been activated yet (the skill provides them as soon as it
+loads):
+
+| Slash             | Local handler? | Notes                              |
+|-------------------+----------------+------------------------------------|
+| =/caveman=        | yes            | Toggle on / cycle level            |
+| =/caveman-commit= | no             | Pass through to RPC =prompt=       |
+| =/caveman-review= | no             | Pass through                       |
+| =/caveman-stats=  | yes            | Capture output, show as overlay    |
+| =/caveman-compress <file>= | yes   | =completing-read= for file picker  |
+
+Non-local handlers just need a name + docstring in the registry so
+they show up in completion; the dispatch falls through to a
+regular =prompt=.
+
+For =/caveman-stats= specifically: send via RPC, intercept the
+assistant message that comes back, parse the savings line, render
+it as a small fringe-style overlay near the header — non-intrusive
+counter that updates every time the command runs.  Cumulative
+session savings could also live in the pretty header-line next to
+the cost (=$0.0023 · ⛏ -1.2k tok=).
+
+* Header-line indicator
+
+Extend =cavemacs-pretty--header-state= with =:caveman-level= (one
+of nil | "lite" | "full" | "ultra" | "wenyan").  When set, the
+header-line renders =⛏ caveman:LEVEL= in
+=cavemacs-pretty-meta-face=, between the model and the cost.
+
+Mouse-1 click cycles the level (same as =C-c C-o C= in the
+transient).
+
+* Customs
+
+#+begin_src elisp
+(defcustom cavemacs-caveman-default-level "full"
+  "Initial caveman level when auto-enabling a new session.
+One of \"lite\" \"full\" \"ultra\" \"wenyan\" or nil to start off."
+  :type '(choice (const :tag "Off" nil)
+                 (const "lite") (const "full")
+                 (const "ultra") (const "wenyan"))
+  :group 'cavemacs-caveman)
+
+(defcustom cavemacs-caveman-auto-enable nil
+  "When to auto-send /caveman at session start.
+- nil (default): never auto-enable; user opts in.
+- t: always auto-enable when the skill is detected.
+- function: called with the project root, returns non-nil to enable."
+  :type '(choice (const :tag "Never" nil)
+                 (const :tag "Always when installed" t)
+                 (function :tag "Predicate"))
+  :group 'cavemacs-caveman)
+
+(defcustom cavemacs-caveman-install-source
+  "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh"
+  "URL or absolute path to caveman's install.sh.
+Set to nil to disable the in-Emacs installer entirely."
+  :type '(choice (const :tag "Disabled" nil) string)
+  :group 'cavemacs-caveman)
+
+(defcustom cavemacs-caveman-install-scope "caveman-code"
+  "Argument passed to caveman's installer --only flag.
+Restricts the installer to just caveman-code's skill path."
+  :type 'string
+  :group 'cavemacs-caveman)
+#+end_src
+
+* Implementation order
+
+1. *Detection* — =cavemacs-caveman--installed-p= + a small
+   ert test against a temp directory with fake SKILL.md files.
+2. *Activation toggle* via the prompt route (mechanism A) — plus a
+   test that asserts =/caveman full= is what hits the RPC =prompt=
+   when toggled on.
+3. *Header-line indicator* — extend pretty state, render the pill,
+   click cycles.
+4. *Customs + transient entry* in =cavemacs-flags.el=.
+5. *Companion commands* registered in =cavemacs-commands--builtins=.
+6. *Installer* — confirmation prompt, run via =compilation-mode=
+   buffer so output is visible; refuse to run if
+   =cavemacs-caveman-install-source= is nil.
+7. *Stats overlay* (optional polish) — parse =/caveman-stats=
+   output, render savings in header-line.
+
+* Tests
+
+- =cavemacs-caveman/detects-project-install= — symlink/create a
+  fake SKILL.md in a temp project root, assert =:project=.
+- =cavemacs-caveman/detects-global-install= — same with
+  =~/.cave/skills/caveman/=.
+- =cavemacs-caveman/none-installed= — assert nil.
+- =cavemacs-caveman/toggle-sends-correct-prompt= — fake RPC conn,
+  call toggle, assert the next outbound envelope is a =prompt=
+  with =/caveman full=.
+- =cavemacs-caveman/level-cycle= — cycle through level list +
+  back to off.
+- =cavemacs-caveman/header-line-shows-level= — set state, render
+  header, regex-match the level pill.
+
+Skip integration tests for the installer — running curl-pipe-bash
+in CI is hostile.
+
+* Risks
+
+- *Upstream rename of trigger phrase.*  caveman could change the
+  trigger from =/caveman= to something else.  Pin the trigger
+  string in a defcustom (=cavemacs-caveman-trigger-format=, default
+  ="/caveman %s"=) so users can repoint without an Emacs release.
+- *Skill not loading even when installed.*  caveman-code may need
+  to be restarted after the installer runs.  After
+  =cavemacs-caveman-install= completes, prompt to =C-c C-r= the
+  current session.
+- *Stats parsing brittleness.*  =/caveman-stats= output format may
+  change.  Wrap parsing in =condition-case=; on failure, show the
+  raw output in the chat buffer instead of swallowing it.
+
+* Non-goals (recap)
+
+- No reimplementation of the caveman ruleset.
+- No statusline savings hook for caveman-code that mimics Claude
+  Code's hook architecture; we read what =/caveman-stats= tells us.
+- No bundling of SKILL.md in this repo.
+- No silent install on first launch.
+
+* Approximate effort
+
+One focused session for items 1–5 (the actual integration).  One
+optional polish session for items 6–7 (installer + stats overlay).
+Zero new dependencies on the cavemacs side.
