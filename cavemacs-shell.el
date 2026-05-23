@@ -77,7 +77,15 @@ Takes one argument: the project name."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET")     #'cavemacs-shell-send-or-newline)
     (define-key map (kbd "M-RET")   #'cavemacs-shell-insert-newline)
-    (define-key map (kbd "TAB")     #'completion-at-point)
+    ;; Bind both TAB representations.  Some minor modes (copilot,
+    ;; yasnippet) override one or the other; binding both reduces
+    ;; the chance of being shadowed.  In practice if copilot-mode
+    ;; is active in this buffer it still wins via
+    ;; emulation-mode-map-alists -- see
+    ;; `cavemacs-shell--ensure-completion-bindings'.
+    (define-key map (kbd "TAB")     #'cavemacs-shell-complete)
+    (define-key map (kbd "<tab>")   #'cavemacs-shell-complete)
+    (define-key map (kbd "/")       #'cavemacs-shell-self-insert-slash)
     (define-key map (kbd "C-c C-c") #'cavemacs-shell-abort)
     (define-key map (kbd "C-c C-k") #'cavemacs-shell-abort)
     (define-key map (kbd "C-c C-n") #'cavemacs-shell-new-session-in-buffer)
@@ -105,7 +113,28 @@ Takes one argument: the project name."
   ;; this is a no-op.
   (require 'cavemacs-commands)
   (cavemacs-commands-setup-capf)
+  ;; Defang minor modes that aggressively bind TAB so our
+  ;; `cavemacs-shell-complete' actually runs.  Most common offender
+  ;; is copilot; yasnippet usually plays nicer but can win on empty
+  ;; lines.  We deliberately do *not* disable the minor mode itself --
+  ;; the user may want it elsewhere -- just its TAB binding in this
+  ;; buffer.
+  (cavemacs-shell--neutralize-rival-tab-bindings)
   (add-hook 'kill-buffer-hook #'cavemacs-shell--on-kill nil t))
+
+(defun cavemacs-shell--neutralize-rival-tab-bindings ()
+  "Unbind TAB in any minor-mode keymap that would shadow our binding.
+
+Adds a buffer-local override so even modes that bind TAB via
+`emulation-mode-map-alists' (like copilot) lose."
+  ;; Override emulation maps (copilot, evil, etc.) at the highest
+  ;; precedence using a buffer-local minor-mode-overriding-map-alist.
+  (let ((override-map (make-sparse-keymap)))
+    (define-key override-map (kbd "TAB")    #'cavemacs-shell-complete)
+    (define-key override-map (kbd "<tab>")  #'cavemacs-shell-complete)
+    (setq-local minor-mode-overriding-map-alist
+                (cons (cons 'cavemacs-shell-mode override-map)
+                      minor-mode-overriding-map-alist))))
 
 (defun cavemacs-shell--mode-line ()
   "Modeline contribution for the cavemacs shell."
@@ -281,6 +310,35 @@ Layout (top to bottom):
   "Insert a literal newline in the input area."
   (interactive)
   (insert "\n"))
+
+(defun cavemacs-shell-complete ()
+  "Trigger completion in the cavemacs input area.
+Forces `completion-at-point' to run our slash-command CAPF even
+when other completion frontends (Copilot, Corfu, etc.) might
+otherwise win the TAB key."
+  (interactive)
+  (if (and (boundp 'cavemacs-shell--input-start-marker)
+           cavemacs-shell--input-start-marker
+           (>= (point) (marker-position cavemacs-shell--input-start-marker)))
+      ;; Inside the input area: always offer slash-command completion
+      ;; via the standard CAPF mechanism.
+      (completion-at-point)
+    ;; Above the input area (read-only output region): fall back to
+    ;; regular tab behaviour.
+    (indent-for-tab-command)))
+
+(defun cavemacs-shell-self-insert-slash ()
+  "Insert / and trigger slash-command completion if at start of input."
+  (interactive)
+  (insert "/")
+  ;; Only auto-trigger when this is the *first* character of the
+  ;; input area (so typing a literal '/' inside a longer prompt
+  ;; like 'use the /etc/passwd file' does NOT pop completion).
+  (when (and (boundp 'cavemacs-shell--input-start-marker)
+             cavemacs-shell--input-start-marker
+             (= (point) (1+ (marker-position
+                             cavemacs-shell--input-start-marker))))
+    (ignore-errors (completion-at-point))))
 
 (defun cavemacs-shell-send-or-newline ()
   "Submit the input area if at end-of-buffer; otherwise insert a newline."
