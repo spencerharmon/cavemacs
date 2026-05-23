@@ -11,6 +11,7 @@
 (require 'cavemacs-shell)
 (require 'cavemacs-rpc)
 (require 'cavemacs-tools)
+(require 'cavemacs-commands)
 
 (defun cavemacs-flags--require-conn ()
   (unless (and (boundp 'cavemacs-shell--conn)

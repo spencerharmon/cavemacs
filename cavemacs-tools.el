@@ -21,6 +21,15 @@
 (require 'subr-x)
 (require 'cavemacs-rpc)
 
+;; Forward declarations: these live in cavemacs-render and cavemacs-shell,
+;; which we cannot `require' here without introducing a load cycle
+;; (cavemacs-shell already loads us via its event-router wiring).
+(declare-function cavemacs-render--notice "cavemacs-render" (text &optional face))
+(declare-function cavemacs-shell--set-mode-info "cavemacs-shell" (text))
+(defvar cavemacs-shell--prompt-marker)
+(defvar cavemacs-shell--mode-line-info)
+(defvar cavemacs-shell--conn)
+
 (defcustom cavemacs-tools-autopilot nil
   "When non-nil, auto-approve all `confirm' requests from caveman.
 This mirrors caveman's own `--autopilot' mode.  Use with caution: tool
