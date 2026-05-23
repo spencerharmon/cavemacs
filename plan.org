@@ -114,6 +114,45 @@ so =C-S-a= still sets mark correctly.
 
 - =cavemacs-shell.el=
 
+* M12 — Worker dispatch (deferred)
+
+** Goal
+
+UI parity with caveman's TUI: recognise an =& prompt= prefix in
+the input area and dispatch to a registered caveman worker (a
+background subagent with its own context window, sometimes its
+own model and tool set).  Worker results stream back into the
+main session as a marked turn.
+
+** Status
+
+Deferred.  User has not yet used caveman workers and wants to
+explore the underlying caveman-code feature first before
+committing to a UX shape on the cavemacs side.
+
+** Pre-implementation questions
+
+Before this is in scope:
+
+1. Does caveman --mode rpc actually expose workers?  If so, what
+   are the RPC verbs (=spawn_worker= / =worker_prompt= /
+   =worker_status= / ...)?  If workers are strictly a TUI
+   input-layer feature, this milestone requires an upstream
+   change first.
+2. What's the user's mental model -- fire-and-forget background
+   jobs, parallel exploration, dedicated long-running
+   investigators?  The UX changes substantially across those.
+3. How visible should they be -- minimal prefix interception in
+   the main buffer, or a sibling worker buffer / status section
+   on the pretty header-line?
+
+** Related files (when implemented)
+
+- =cavemacs-shell.el= (input area `&' prefix interception)
+- =cavemacs-render.el= (=[worker:NAME]= turn marker rendering)
+- =cavemacs-rpc.el= (worker verbs)
+- =cavemacs-pretty.el= (header-line worker count, optional)
+
 * M11 — Collapsible thinking text and tool-call blocks
 
 ** Goal

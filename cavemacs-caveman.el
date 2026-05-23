@@ -57,11 +57,14 @@
                            cavemacs-caveman-levels))
   :group 'cavemacs-caveman)
 
-(defcustom cavemacs-caveman-auto-enable nil
+(defcustom cavemacs-caveman-auto-enable t
   "When to auto-enable caveman at session start.
 
-- nil (default): never auto-enable; user opts in.
-- t: auto-enable whenever the skill is detected (project or global).
+- nil: never auto-enable; user opts in.
+- t (default): auto-enable whenever the skill is detected (project or
+  global).  Failing silently when the skill isn't installed is fine --
+  the user just sees uncompressed agent output and can install with
+  M-x cavemacs-caveman-install when they want it.
 - function: called with the project root, returns non-nil to enable.
 
 When auto-enable triggers, `cavemacs-caveman-default-level' is used."
