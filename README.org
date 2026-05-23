@@ -1,7 +1,7 @@
 #+TITLE: cavemacs — Emacs front-end for caveman-code
 #+OPTIONS: toc:2 num:nil
 
-/fire good. parens better. cavemacs both./
+/emacs talk like caveman too/
 
 * What is this?
 
