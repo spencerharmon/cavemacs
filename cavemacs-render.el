@@ -348,6 +348,7 @@ instead of submitting the next prompt."
         (ov-end (overlay-end ov))
         (text (or (overlay-get ov 'cavemacs-text) ""))
         (thinking (or (overlay-get ov 'cavemacs-thinking) ""))
+        (is-error (overlay-get ov 'cavemacs-error))
         (buf (overlay-buffer ov)))
     (when (and (buffer-live-p buf) body-start ov-end)
       (with-current-buffer buf
@@ -366,10 +367,16 @@ instead of submitting the next prompt."
           (let ((text-start (point)))
             (insert text)
             (unless (eq (char-before) ?\n) (insert "\n"))
-            (when (and cavemacs-render-fontify-markdown
+            (cond
+             (is-error
+              ;; Paint the whole body with the error face; do NOT
+              ;; apply markdown fontification.
+              (put-text-property text-start (point) 'face
+                                 'cavemacs-error-face))
+             ((and cavemacs-render-fontify-markdown
                        (featurep 'markdown-mode))
               (cavemacs-render--fontify-markdown text-start (point))))
-          (move-overlay ov (overlay-start ov) (point)))))))
+            (move-overlay ov (overlay-start ov) (point))))))))
 
 (defun cavemacs-render--fontify-markdown (beg end)
   "Apply markdown font-lock keywords to the region BEG..END."
@@ -383,19 +390,70 @@ instead of submitting the next prompt."
           (font-lock-default-fontify-region (point-min) (point-max) nil))))))
 
 (defun cavemacs-render--on-message-end (event)
-  "Finalize a message's overlay state."
+  "Finalize a message's overlay state.
+
+If the message's `stopReason' is \"error\" and an `errorMessage'
+is present, surface that error visibly under the assistant block.
+Caveman emits these when a provider rejects the request (rate
+limit, content filter, malformed body, model-specific parameter
+mismatches, etc.); without this branch the user just sees an
+empty assistant message and no indication that anything went
+wrong."
   (let* ((msg (alist-get 'message event))
-         (key (cavemacs-render--message-key msg)))
+         (key (cavemacs-render--message-key msg))
+         (stop-reason (alist-get 'stopReason msg))
+         (error-message (alist-get 'errorMessage msg)))
     (when-let* ((ov (and key (gethash key cavemacs-render--message-overlays))))
       (when (eq (overlay-get ov 'cavemacs-role) 'assistant)
-        ;; Ensure final text is flushed (use the full message content as
-        ;; source of truth in case a delta was dropped).
+        ;; Ensure final text is flushed (use the full message content
+        ;; as source of truth in case a delta was dropped).
         (let ((full (cavemacs-render--message-text msg)))
           (when (and full (not (string-empty-p full)))
             (overlay-put ov 'cavemacs-text full)
             (cavemacs-render--repaint-assistant ov)))
+        ;; Surface upstream errors.
+        (when (and (equal stop-reason "error") error-message)
+          (overlay-put ov 'cavemacs-text
+                       (cavemacs-render--format-error error-message))
+          (overlay-put ov 'cavemacs-error t)
+          (cavemacs-render--repaint-assistant ov))
         (when (eq ov cavemacs-render--current-assistant-ov)
           (setq cavemacs-render--current-assistant-ov nil))))))
+
+(defun cavemacs-render--format-error (raw)
+  "Coerce caveman's RAW errorMessage string into something readable.
+
+Caveman often wraps provider responses verbatim, e.g.:
+  400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",
+       \"message\":\"...\"},...}
+
+Try to JSON-decode the trailing object and pull `error.message';
+fall back to the raw text if parsing fails."
+  (let* ((status (when (string-match "\\`\\([0-9]\\{3\\}\\)[[:space:]]+" raw)
+                   (match-string 1 raw)))
+         (json-tail (if (and status
+                             (string-match
+                              "\\`[0-9]\\{3\\}[[:space:]]+\\({.*}\\)\\'"
+                              raw))
+                        (match-string 1 raw)
+                      (when (string-match "\\`\\({.*}\\)\\'" raw)
+                        (match-string 1 raw))))
+         (extracted
+          (when json-tail
+            (condition-case nil
+                (let* ((obj (json-parse-string json-tail
+                                               :object-type 'alist
+                                               :null-object nil
+                                               :false-object nil))
+                       (err (alist-get 'error obj)))
+                  (or (and err (alist-get 'message err))
+                      (alist-get 'message obj)))
+              (error nil)))))
+    (cond
+     ((and status extracted) (format "⚠ %s · %s" status extracted))
+     (extracted              (format "⚠ %s" extracted))
+     (status                 (format "⚠ %s · %s" status raw))
+     (t                      (format "⚠ %s" raw)))))
 
 ;; -----------------------------------------------------------------------------
 ;; Tool execution

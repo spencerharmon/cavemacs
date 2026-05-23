@@ -111,5 +111,58 @@
                                    (whatever . "data"))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-render/surfaces-upstream-error ()
+  "When message_end has stopReason=error + errorMessage, that error
+must be rendered visibly under the assistant block.  Caveman emits
+these for provider rejections (rate-limit, content filter, model-
+specific param mismatches, etc.); silent empty assistant blocks
+are a UX regression."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          ;; Start an assistant message.
+          (cavemacs-render-event
+           '((type . "message_start")
+             (message . ((role . "assistant")
+                         (content . nil)
+                         (provider . "github-copilot")
+                         (model . "claude-opus-4.7")))))
+          ;; End it with an upstream error and no content.
+          (cavemacs-render-event
+           '((type . "message_end")
+             (message . ((role . "assistant")
+                         (content . nil)
+                         (provider . "github-copilot")
+                         (model . "claude-opus-4.7")
+                         (stopReason . "error")
+                         (errorMessage . "400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"\\\"thinking.type.enabled\\\" is not supported for this model.\"}}")))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            ;; Status code surfaced.
+            (should (string-match-p "400" text))
+            ;; Human-readable error message extracted.
+            (should (string-match-p "thinking.type.enabled" text))
+            ;; Warning sigil present.
+            (should (string-match-p "⚠" text))))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-render/error-fallback-when-unparseable ()
+  "If the errorMessage doesn't match the JSON shape we expect,
+fall back to showing it raw with the sigil."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "message_start")
+             (message . ((role . "assistant") (content . nil)))))
+          (cavemacs-render-event
+           '((type . "message_end")
+             (message . ((role . "assistant")
+                         (content . nil)
+                         (stopReason . "error")
+                         (errorMessage . "Connection refused")))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "⚠ Connection refused" text))))
+      (kill-buffer buf))))
+
 (provide 'cavemacs-render-test)
 ;;; cavemacs-render-test.el ends here

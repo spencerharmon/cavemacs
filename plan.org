@@ -63,6 +63,65 @@ asserts `(eobp)' *without* a manual goto-char first.
 Fix: same as R1 (advance point + every window-point to the new
 point-max after each render insert, when the user was at the bottom).
 
+* Bugfix: C-a moves point into read-only prompt
+
+** Symptom
+
+Pressing =C-a= (=beginning-of-line= / =move-beginning-of-line=) in
+the shell input area moves point to column 0, inside the read-only
+prompt prefix (the => = character and separator).  The user can't
+type there, but the cursor position is confusing and breaks
+expectations — =C-a= should land at the first editable column.
+
+** Fix
+
+Bind =C-a= (and possibly =home=) in =cavemacs-shell-mode-map= to a
+command that moves point to =cavemacs-shell--input-start-marker=
+instead of =(line-beginning-position)=.  Respect =shift-select-mode=
+so =C-S-a= still sets mark correctly.
+
+** Related files
+
+- =cavemacs-shell.el=
+
+* M11 — Collapsible thinking text and tool-call blocks
+
+** Goal
+
+Thinking text and tool-call output can be verbose, dominating the
+buffer and pushing conversation content off-screen.  Render these
+blocks collapsed by default with a clickable/keybound toggle to
+expand or collapse them in place.
+
+** Requirements
+
+- Thinking blocks render collapsed (single summary line, e.g.
+  =▶ Thinking (42 lines)=) by default.
+- Tool-call blocks render collapsed (e.g. =▶ tool: read file.el=)
+  by default.
+- =TAB= or =RET= on a collapsed header expands the full content
+  inline; same key collapses it again.
+- Mouse click on the header also toggles.
+- A command / custom variable to toggle *all* blocks in the buffer
+  (expand-all / collapse-all).
+- Expanded state is buffer-local and non-persistent (restarting
+  session resets to collapsed).
+
+** Implementation sketch
+
+- Use overlays with =display= or =invisible= property on the body
+  region; keep the header line always visible.
+- Store expand/collapse state as an overlay property.
+- Add a keymap on the header overlay (=keymap= property) for
+  =TAB= / =RET= / mouse-1 toggles.
+- Hook into =cavemacs-render.el= where thinking and tool-call
+  events are inserted.
+
+** Related files
+
+- =cavemacs-render.el= (insertion of thinking / tool-call blocks)
+- =cavemacs-shell.el= (buffer keymap coordination)
+
 * M10 — Slash command dispatch + in-prompt autocomplete
 
 ** Problem (discovered post-v0.1.0)
