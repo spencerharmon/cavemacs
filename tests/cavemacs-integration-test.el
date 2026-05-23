@@ -71,5 +71,63 @@
             (ignore-errors (cavemacs-rpc-stop cavemacs-shell--conn))))
         (kill-buffer buf)))))
 
+(ert-deftest cavemacs-integration/two-prompts-back-to-back ()
+  "Regression: after the first send, the input area must be empty and
+RET must still send the next prompt (not just insert a newline)."
+  (skip-unless (executable-find "caveman"))
+  (let* ((cavemacs-ephemeral-default t)
+         (cavemacs-default-provider "github-copilot")
+         (buf (cavemacs-shell-new :project-root default-directory))
+         (turn-count 0))
+    (unwind-protect
+        (progn
+          (cavemacs-integration-test--wait-for
+           buf (lambda () (and cavemacs-shell--conn
+                               (cavemacs-rpc-live-p cavemacs-shell--conn)))
+           5)
+          ;; Track agent_end events so the test can wait for actual
+          ;; turn completion, not just idle modeline (which is also
+          ;; the post-get_state initial state).
+          (with-current-buffer buf
+            (cavemacs-rpc-add-event-hook
+             cavemacs-shell--conn
+             (lambda (e)
+               (when (equal (alist-get 'type e) "agent_end")
+                 (cl-incf turn-count)))))
+          ;; First send.
+          (with-current-buffer buf
+            (goto-char (point-max))
+            (insert "say PING")
+            (cavemacs-shell-send))
+          (cavemacs-integration-test--wait-for
+           buf (lambda () (>= turn-count 1)) 60)
+          (should (>= turn-count 1))
+          (sleep-for 0.5) ; let the message_end render flush
+          (should (with-current-buffer buf
+                    (save-excursion (goto-char (point-min))
+                                    (search-forward "PING" nil t))))
+          ;; After first turn: input area must be empty, point-max
+          ;; must be at the user-editable position.
+          (with-current-buffer buf
+            (should (string-empty-p (or (cavemacs-shell--input-text) "")))
+            (goto-char (point-max))
+            (should (eobp))
+            (should (>= (point) (marker-position
+                                 cavemacs-shell--input-start-marker)))
+            (insert "say PONG")
+            (cavemacs-shell-send))
+          (cavemacs-integration-test--wait-for
+           buf (lambda () (>= turn-count 2)) 60)
+          (should (>= turn-count 2))
+          (sleep-for 0.5)
+          (should (with-current-buffer buf
+                    (save-excursion (goto-char (point-min))
+                                    (search-forward "PONG" nil t)))))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (when cavemacs-shell--conn
+            (ignore-errors (cavemacs-rpc-stop cavemacs-shell--conn))))
+        (kill-buffer buf)))))
+
 (provide 'cavemacs-integration-test)
 ;;; cavemacs-integration-test.el ends here

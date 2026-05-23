@@ -38,7 +38,14 @@
   "The `cavemacs-rpc-conn' for this buffer.")
 
 (defvar-local cavemacs-shell--prompt-marker nil
-  "Marker at the start of the user input area.")
+  "Marker just before the input-area separator/prompt prefix.
+Rendering inserts at this marker (which advances on insert), so
+rendered output piles up above the separator while the input area
+stays at the bottom of the buffer.")
+
+(defvar-local cavemacs-shell--input-start-marker nil
+  "Marker at the first user-editable position (just after the prompt prefix).
+Point-max minus this marker is the user's current input.")
 
 (defvar-local cavemacs-shell--project-root nil
   "Absolute project root directory associated with this buffer.")
@@ -131,25 +138,42 @@ resume an on-disk session."
              'face 'cavemacs-meta-face))))
 
 (defun cavemacs-shell--install-prompt ()
-  "Insert the input-area separator and prompt marker."
+  "Insert the input-area separator and prompt prefix, and set markers.
+
+Layout (top to bottom):
+   ...rendered output...
+   [prompt-marker]            <- new render output inserted here
+   ─────...
+   > [input-start-marker]_    <- user types here"
   (let ((inhibit-read-only t))
     (goto-char (point-max))
     (unless (eq (char-before) ?\n) (insert "\n"))
-    (let ((sep-start (point)))
+    (let ((prompt-pos (point)))
+      ;; Insert the prompt furniture.
       (insert (propertize
                (concat (make-string 70 ?─) "\n")
                'face 'cavemacs-meta-face
                'read-only t
+               'front-sticky '(read-only)
                'rear-nonsticky '(read-only face)))
       (insert (propertize cavemacs-shell-prompt
                           'face 'cavemacs-user-prefix-face
                           'read-only t
+                          'front-sticky '(read-only)
                           'rear-nonsticky '(read-only face)))
-      ;; Lock everything before this point as read-only.
-      (put-text-property (point-min) (point) 'read-only t)
-      (setq cavemacs-shell--prompt-marker (copy-marker (point) nil))
-      (set-marker-insertion-type cavemacs-shell--prompt-marker nil)
-      (ignore sep-start)))
+      ;; Now create the markers.  prompt-marker is at prompt-pos
+      ;; (before the separator).  insertion-type t means later
+      ;; (insert ...) at that position pushes the marker forward,
+      ;; so the separator+prefix stay anchored to the bottom of the
+      ;; buffer while rendered output accumulates above.
+      (setq cavemacs-shell--prompt-marker (copy-marker prompt-pos t))
+      ;; input-start-marker: at point (right after the prefix).
+      ;; insertion-type nil means user typing past it does not
+      ;; advance the marker, so the marker keeps marking the
+      ;; first user-editable column.
+      (setq cavemacs-shell--input-start-marker (copy-marker (point) nil))
+      ;; Make everything from BOB through the prompt prefix read-only.
+      (put-text-property (point-min) (point) 'read-only t)))
   (goto-char (point-max)))
 
 ;; -----------------------------------------------------------------------------
@@ -224,17 +248,17 @@ resume an on-disk session."
 
 (defun cavemacs-shell--input-text ()
   "Return the current contents of the input area, trimmed."
-  (when (and cavemacs-shell--prompt-marker
-             (marker-position cavemacs-shell--prompt-marker))
+  (when (and cavemacs-shell--input-start-marker
+             (marker-position cavemacs-shell--input-start-marker))
     (string-trim
      (buffer-substring-no-properties
-      (marker-position cavemacs-shell--prompt-marker)
+      (marker-position cavemacs-shell--input-start-marker)
       (point-max)))))
 
 (defun cavemacs-shell--clear-input ()
   "Delete the contents of the input area."
   (let ((inhibit-read-only t))
-    (delete-region (marker-position cavemacs-shell--prompt-marker)
+    (delete-region (marker-position cavemacs-shell--input-start-marker)
                    (point-max))))
 
 (defun cavemacs-shell-insert-newline ()
@@ -246,8 +270,8 @@ resume an on-disk session."
   "Submit the input area if at end-of-buffer; otherwise insert a newline."
   (interactive)
   (cond
-   ((or (not cavemacs-shell--prompt-marker)
-        (< (point) (marker-position cavemacs-shell--prompt-marker)))
+   ((or (not cavemacs-shell--input-start-marker)
+        (< (point) (marker-position cavemacs-shell--input-start-marker)))
     (newline))
    ((eobp)
     (cavemacs-shell-send))
@@ -262,15 +286,14 @@ resume an on-disk session."
     (when (or (null text) (string-empty-p text))
       (user-error "cavemacs: nothing to send"))
     (cavemacs-shell--clear-input)
-    ;; Render the user prompt locally (caveman will also emit message_start
-    ;; for the user, but echoing locally avoids a perceptible delay).
-    (cavemacs-render--at-output
-      (cavemacs-render--ensure-blank-line-before)
-      (insert (propertize "You" 'face 'cavemacs-user-prefix-face) "\n")
-      (insert text)
-      (insert "\n"))
+    ;; Caveman will emit `message_start' for the user message, which
+    ;; the renderer turns into the visible "You ..." block.  We do
+    ;; *not* echo locally: a second echo would double-render.
     (cavemacs-rpc-send cavemacs-shell--conn "prompt" :message text)
-    (cavemacs-shell--set-mode-info "sent")))
+    (cavemacs-shell--set-mode-info "sent")
+    ;; Park point in the now-empty input area so the user can keep typing
+    ;; and so `(eobp)' will be true on the next RET.
+    (goto-char (point-max))))
 
 (defun cavemacs-shell-abort ()
   "Abort the current run, if any."
@@ -299,18 +322,17 @@ Does not spawn a new buffer."
         (pp (alist-get 'data resp) (current-buffer))))))
 
 (defun cavemacs-shell-clear-output ()
-  "Erase rendered output above the prompt marker."
+  "Erase rendered output above the prompt separator."
   (interactive)
   (let ((inhibit-read-only t)
         (mark (and cavemacs-shell--prompt-marker
                    (marker-position cavemacs-shell--prompt-marker))))
     (when mark
-      ;; Find the start of the separator line so we wipe it too.
-      (save-excursion
-        (goto-char mark)
-        (forward-line -1)
-        (beginning-of-line)
-        (delete-region (point-min) (point))))
+      ;; Delete everything from the start of the buffer up to (but not
+      ;; including) the prompt marker -- that wipes only rendered turns
+      ;; and leaves the banner... actually wipe the banner too: it's
+      ;; informational and gets pushed off-screen quickly anyway.
+      (delete-region (point-min) mark))
     (cavemacs-render-init-buffer)))
 
 (defun cavemacs-shell-quit ()

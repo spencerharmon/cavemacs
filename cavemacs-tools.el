@@ -27,6 +27,7 @@
 (declare-function cavemacs-render--notice "cavemacs-render" (text &optional face))
 (declare-function cavemacs-shell--set-mode-info "cavemacs-shell" (text))
 (defvar cavemacs-shell--prompt-marker)
+(defvar cavemacs-shell--input-start-marker)
 (defvar cavemacs-shell--mode-line-info)
 (defvar cavemacs-shell--conn)
 
@@ -155,15 +156,14 @@ calls will execute without user prompt."
 
 (defun cavemacs-tools--set-editor-text (req)
   "Replace the input area with REQ's text (used by some extensions)."
-  (when (and (boundp 'cavemacs-shell--prompt-marker)
-             cavemacs-shell--prompt-marker)
+  (when (and (boundp 'cavemacs-shell--input-start-marker)
+             cavemacs-shell--input-start-marker)
     (let ((inhibit-read-only t)
           (text (or (alist-get 'text req) "")))
-      (save-excursion
-        (delete-region (marker-position cavemacs-shell--prompt-marker)
-                       (point-max))
-        (goto-char (marker-position cavemacs-shell--prompt-marker))
-        (insert text)))))
+      (delete-region (marker-position cavemacs-shell--input-start-marker)
+                     (point-max))
+      (goto-char (point-max))
+      (insert text))))
 
 (provide 'cavemacs-tools)
 ;;; cavemacs-tools.el ends here
