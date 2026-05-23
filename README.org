@@ -1,6 +1,8 @@
 #+TITLE: cavemacs — Emacs front-end for caveman-code
 #+OPTIONS: toc:2 num:nil
 
+/fire good. parens better. cavemacs both./
+
 * What is this?
 
 cavemacs is an Emacs interface to the [[https://github.com/JuliusBrussee/caveman-code][caveman-code]] terminal coding
@@ -44,12 +46,50 @@ v0.1.0 — usable for daily work. All 8 planned milestones complete:
 
 * Installation
 
-Manual (until MELPA submission):
+** With straight.el (recommended)
+
+Add to your =init.el= / =.emacs=:
+
+#+begin_src elisp
+(straight-use-package
+ '(cavemacs :type git :host github :repo "spencerharmon/cavemacs"))
+(require 'cavemacs)
+#+end_src
+
+With =use-package= integration (=straight-use-package-by-default= on,
+or per-form =:straight=):
+
+#+begin_src elisp
+(use-package cavemacs
+  :straight (:type git :host github :repo "spencerharmon/cavemacs")
+  :commands (cavemacs cavemacs-new cavemacs-continue cavemacs-session-browser)
+  :custom
+  (cavemacs-default-provider "github-copilot"))
+#+end_src
+
+Pin to a specific tag or commit if you want stability over freshness:
+
+#+begin_src elisp
+(straight-use-package
+ '(cavemacs :type git :host github
+            :repo "spencerharmon/cavemacs"
+            :branch "main"
+            :commit "v0.1.0"))
+#+end_src
+
+Don't have straight.el yet?  See the [[https://github.com/radian-software/straight.el#getting-started][bootstrap snippet]] — three lines
+at the top of your init file.
+
+** Manual
 
 #+begin_src elisp
 (add-to-list 'load-path "/path/to/cavemacs")
 (require 'cavemacs)
 #+end_src
+
+** MELPA
+
+Not yet submitted.  Planned post-v0.2.
 
 * Quick start
 
