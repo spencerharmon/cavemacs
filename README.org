@@ -1,0 +1,217 @@
+#+TITLE: cavemacs — Emacs front-end for caveman-code
+#+OPTIONS: toc:2 num:nil
+
+* What is this?
+
+cavemacs is an Emacs interface to the [[https://github.com/JuliusBrussee/caveman-code][caveman-code]] terminal coding
+agent. It wraps the =caveman --mode rpc= JSONL protocol, presenting a
+streaming chat buffer with markdown rendering, tool-call approvals,
+per-project session persistence, and integration with the rest of the
+Caveman ecosystem ([[https://github.com/JuliusBrussee/cavekit][cavekit]], [[https://github.com/JuliusBrussee/cavemem][cavemem]]).
+
+It is in the spirit of [[https://github.com/xenodium/agent-shell][agent-shell]], but does *not* depend on it:
+agent-shell speaks the Agent Client Protocol (ACP), and caveman-code
+does not implement ACP. cavemacs implements caveman's custom RPC
+protocol directly.
+
+* Status
+
+v0.1.0 — usable for daily work. All 8 planned milestones complete:
+
+| | |
+|---|---|
+| M0 | RPC protocol research + spike |
+| M1 | Package skeleton + transport |
+| M2 | Streaming render + markdown |
+| M3 | Tool-call approval UI |
+| M4 | Multi-session buffers + browser |
+| M5 | Slash commands + cavekit/cavemem |
+| M6 | Mid-session flags transient |
+| M7 | Unit + integration tests + CI |
+| M8 | This document |
+
+* Requirements
+
+- Emacs 30.1 or later
+- [[https://github.com/jrblevin/markdown-mode][markdown-mode]] (font-lock is reused for assistant blocks)
+- [[https://github.com/magit/transient][transient]] (built-in on Emacs 30)
+- [[https://github.com/JuliusBrussee/caveman-code][caveman-code]] (=npm install -g @juliusbrussee/caveman-code=, requires
+  Node.js 22 LTS — 24 currently has a transitive better-sqlite3
+  prebuild gap)
+- At least one provider authenticated. Run =caveman= → =/login= and
+  pick a provider (GitHub Copilot works without extra cost if you
+  already have a Copilot subscription).
+
+* Installation
+
+Manual (until MELPA submission):
+
+#+begin_src elisp
+(add-to-list 'load-path "/path/to/cavemacs")
+(require 'cavemacs)
+#+end_src
+
+* Quick start
+
+1. =M-x cavemacs= in any directory.
+   - If you're in a git repo with no prior sessions, you get a fresh
+     buffer.
+   - If a session already exists for the project, the browser opens
+     and you can resume.
+   - Prefix arg (=C-u M-x cavemacs=) always creates a fresh ephemeral
+     session.
+2. Type at the prompt =>= and hit =RET= to send. =M-RET= for newlines.
+3. When caveman needs to run a tool that mutates files (=edit=, =bash=,
+   =write=), you'll be asked =y/n/a=. =a= = approve and remember for
+   this buffer.
+
+* Key bindings
+
+In a =cavemacs-shell-mode= buffer:
+
+| Key       | Action                                          |
+|-----------+-------------------------------------------------|
+| =RET=     | Send buffered input (at EOB) / newline (mid-buf)|
+| =M-RET=   | Insert literal newline                          |
+| =C-c C-c= | Abort the current run                           |
+| =C-c C-n= | Reset the session (=new_session=) in-place      |
+| =C-c C-l= | Clear rendered output                           |
+| =C-c C-s= | Show =get_state= response                       |
+| =C-c C-q= | Stop process and kill buffer                    |
+| =C-c C-o= | Open flags transient (model, thinking, etc.)    |
+| =C-c C-p= | Pick a slash command from the registered list   |
+
+Outside any cavemacs buffer:
+
+| Key                 | Action                                  |
+|---------------------+-----------------------------------------|
+| =M-x cavemacs=      | Open / resume for current project       |
+| =M-x cavemacs-new=  | Always create a fresh buffer            |
+| =M-x cavemacs-continue= | Resume most recent session for project |
+| =M-x cavemacs-session-browser= | Browse + resume / fork / delete |
+| =M-x cavemacs-cavekit= | Cavekit /ck:spec / /ck:build / /ck:check |
+| =M-x cavemacs-cavemem-search= | =/memory search ...= in session |
+| =M-x cavemacs-cavemem-viewer= | Open http://127.0.0.1:37777     |
+
+* Configuration
+
+#+begin_src elisp
+;; Where caveman lives (defaults to "caveman" via executable-find).
+(setq cavemacs-binary "/home/spencer/.nvm/versions/node/v22.22.3/bin/caveman")
+
+;; Default provider/model/thinking.  All optional.
+(setq cavemacs-default-provider "github-copilot")
+(setq cavemacs-default-model "claude-3-7-sonnet")
+(setq cavemacs-thinking-level "medium")
+
+;; Pass extra flags to every spawned session.
+(setq cavemacs-extra-args '("--tools" "read,bash,edit,write,grep,find,ls"))
+
+;; Disable session persistence by default (always ephemeral).
+(setq cavemacs-ephemeral-default t)
+
+;; Per-buffer autopilot: auto-approve all confirms.  Default nil.
+;; Toggle live with M-x cavemacs-flags-toggle-autopilot.
+(setq cavemacs-tools-autopilot nil)
+#+end_src
+
+=M-x customize-group RET cavemacs RET= for the full list.
+
+* Architecture
+
+#+begin_src
+cavemacs.el           top-level façade + M-x entry points
+cavemacs-config.el    customs, binary lookup, CLI arg builder
+cavemacs-rpc.el       caveman --mode rpc JSONL transport
+cavemacs-project.el   git/project.el root detection
+cavemacs-render.el    AgentSessionEvent -> buffer text/overlays
+cavemacs-shell.el     cavemacs-shell-mode major mode + buffer
+cavemacs-tools.el     extension_ui_request handler (approvals)
+cavemacs-session.el   per-project session enumeration + browser
+cavemacs-commands.el  slash-command discovery + completion
+cavemacs-cavekit.el   cavekit transient menu
+cavemacs-cavemem.el   cavemem helpers (search, viewer)
+cavemacs-flags.el     per-shell model/thinking transient (C-c C-o)
+#+end_src
+
+The dependency direction is:
+
+#+begin_src
+cavemacs.el
+   ├─ cavemacs-config
+   ├─ cavemacs-rpc
+   ├─ cavemacs-project
+   ├─ cavemacs-render
+   ├─ cavemacs-shell ── (config rpc render project)
+   ├─ cavemacs-tools ── (rpc render)
+   ├─ cavemacs-session ── (project shell)
+   ├─ cavemacs-commands ── (rpc shell)
+   ├─ cavemacs-cavekit ── (shell commands)
+   ├─ cavemacs-cavemem ── (shell commands)
+   └─ cavemacs-flags  ── (shell rpc tools)
+#+end_src
+
+* Protocol notes
+
+The =docs/api.md= page on caveman's site advertises a JSON-RPC 2.0
+shape with =session.create= / =session.prompt= methods. *That is not
+what the binary actually speaks.*  The real protocol (verified
+against =caveman-code 0.65.2= source at
+=packages/coding-agent/src/modes/rpc/=) is:
+
+- Strict LF-delimited JSONL on stdin/stdout.
+- Commands: ={"id"?, "type": "<verb>", ...}=. Verbs include =prompt=,
+  =new_session=, =abort=, =fork=, =compact=, =get_state=,
+  =get_messages=, =get_commands=, =set_model=, =cycle_model=,
+  =get_available_models=, =set_thinking_level=, =cycle_thinking_level=,
+  =switch_session=, =bash=, =abort_bash=, =get_session_stats=,
+  =export_html=, =set_session_name=, =set_steering_mode=,
+  =set_follow_up_mode=, =set_auto_compaction=, =set_auto_retry=,
+  =abort_retry=, =steer=, =follow_up=, =get_fork_messages=,
+  =get_last_assistant_text=.
+- Responses: ={"id"?, "type": "response", "command": <verb>, "success":
+  bool, "data"?: ..., "error"?: ...}=.
+- Events (one process = one session, multiple turns): AgentEvent
+  envelope with =type= ∈ ={agent,turn,message}_{start,update,end}=,
+  =tool_execution_{start,update,end}=, =queue_update=,
+  =compaction_{start,end}=, =auto_retry_{start,end}=,
+  =checkpoint_taken=, =subagent_progress=, =extension_error=.
+- Interactive UI (tool approvals, file pickers, etc.) flows through
+  =extension_ui_request= / =extension_ui_response= messages.
+
+There is no per-command sessionId — the running process *is* the
+session. =new_session= resets; =switch_session= loads a different
+on-disk file.
+
+* Running the tests
+
+#+begin_src bash
+# Unit + render tests (no process):
+emacs --batch -L . \
+  -l tests/cavemacs-rpc-test.el \
+  -l tests/cavemacs-render-test.el \
+  -f ert-run-tests-batch-and-exit
+
+# Integration test (requires `caveman' on PATH + auth):
+emacs --batch -L . \
+  -l tests/cavemacs-integration-test.el \
+  -f ert-run-tests-batch-and-exit
+#+end_src
+
+* Limitations & not-yet-supported
+
+- *Daemon mode.* =caveman serve= + the WebSocket API is not yet
+  wired up. cavemacs currently spawns one subprocess per buffer.
+- *Diff rendering.* Tool results that contain unified diffs are
+  rendered as plain text; native =diff-mode= fontification is on
+  the roadmap.
+- *Image input.* The =prompt= command supports an =images= field;
+  no Emacs UI is wired up yet.
+- *Worker dispatch.* The =& prompt=-prefix worker-dispatch UI from
+  caveman's own TUI is not implemented.
+
+See =plan.org= for the full milestone breakdown and =M9= stretch list.
+
+* License
+
+MIT.
