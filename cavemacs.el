@@ -10,8 +10,7 @@
 ;;; Commentary:
 
 ;; cavemacs is an Emacs front-end for the caveman-code terminal coding
-;; agent (https://github.com/JuliusBrussee/caveman-code), in the spirit
-;; of agent-shell (https://github.com/xenodium/agent-shell).
+;; agent (https://github.com/JuliusBrussee/caveman-code).
 ;;
 ;; It wraps the `caveman --mode rpc' JSONL protocol, presenting a
 ;; streaming chat buffer with tool-call approvals, markdown rendering,

@@ -11,11 +11,6 @@ streaming chat buffer with markdown rendering, tool-call approvals,
 per-project session persistence, and integration with the rest of the
 Caveman ecosystem ([[https://github.com/JuliusBrussee/cavekit][cavekit]], [[https://github.com/JuliusBrussee/cavemem][cavemem]]).
 
-It is in the spirit of [[https://github.com/xenodium/agent-shell][agent-shell]], but does *not* depend on it:
-agent-shell speaks the Agent Client Protocol (ACP), and caveman-code
-does not implement ACP. cavemacs implements caveman's custom RPC
-protocol directly.
-
 * Status
 
 v0.1.0 — usable for daily work. All 8 planned milestones complete:

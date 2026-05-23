@@ -14,11 +14,11 @@ with =[CORRECTED]= markers.
 * Overview
 
 cavemacs is an Emacs front-end ("shell") for the [[https://github.com/JuliusBrussee/caveman-code][caveman-code]]
-terminal coding agent, in the spirit of [[https://github.com/xenodium/agent-shell][agent-shell]]. It wraps the
-=caveman= binary as an external process and surfaces its agent loop
-inside an Emacs buffer with streaming output, markdown rendering, tool
-call approvals, and per-project session persistence. It is designed to
-compose cleanly with the rest of the Caveman ecosystem:
+terminal coding agent. It wraps the =caveman= binary as an external
+process and surfaces its agent loop inside an Emacs buffer with
+streaming output, markdown rendering, tool call approvals, and
+per-project session persistence. It is designed to compose cleanly
+with the rest of the Caveman ecosystem:
 
 - *caveman-code* — the agent runtime cavemacs drives (source of truth).
 - *cavekit* — the spec-driven workflow (=/ck:spec=, =/ck:build=,
@@ -38,9 +38,8 @@ compose cleanly with the rest of the Caveman ecosystem:
 
 ** Protocol decision (key finding from research)
 
-agent-shell is built on the *Agent Client Protocol* (ACP) and the
-[[https://github.com/xenodium/acp.el][acp.el]] library. caveman-code does *not* speak ACP. It exposes four
-programmatic surfaces (see =caveman-code/docs/api.md=):
+caveman-code exposes four programmatic surfaces (see
+=caveman-code/docs/api.md=):
 
 1. =caveman --mode rpc= — *JSON-RPC over stdin/stdout, JSONL framed.*
    Methods: =session.create=, =session.prompt=, =session.events=
@@ -155,7 +154,7 @@ prompt marker and a multi-line input area below.  This kept the
 dependency surface small (only =markdown-mode= and =transient=) and
 gave full control over overlay-based streaming updates.
 
-*Package layout* (multi-file; mirrors agent-shell's convention):
+*Package layout* (multi-file, one module per concern):
 
 - =cavemacs.el= — entry points, autoloads, top-level customs, version.
 - =cavemacs-rpc.el= — process management, JSONL framing, request/
@@ -177,14 +176,14 @@ gave full control over overlay-based streaming updates.
 
 *Dependencies* (declare in =Package-Requires=):
 - =emacs "30.1"=
-- =shell-maker "0.78.1"= (or current; same one agent-shell uses)
+- =shell-maker "0.78.1"= (or current)
 - =markdown-mode= (for fontification of streamed blocks)
 - =transient= (built-in; for cavekit / command menus)
 - =project= (built-in)
 
-We do *not* depend on =agent-shell= itself or =acp.el= — wrong
-protocol, and a hard dep on agent-shell would pin its ACP assumptions
-into our buffer setup.
+cavemacs implements caveman's RPC protocol directly, with no
+intermediate transport library.  The protocol layer is bespoke to
+this project.
 
 *RPC core requirements:*
 - One =caveman --mode rpc --protocol-version=v1= subprocess per shell
@@ -202,11 +201,10 @@ tokens stream into the buffer in real time, =C-c C-c= cancels the
 in-flight prompt.
 
 ** M2 — Rendering & markdown :ui:
-*Goal:* output that looks as good as agent-shell's.
+*Goal:* readable, well-formatted streamed output.
 
 - Streaming insertion that preserves point if user is reading
-  scrollback; jump-to-bottom otherwise (agent-shell has this — port
-  the heuristic from =agent-shell-ui.el=).
+  scrollback; jump-to-bottom otherwise.
 - Per-turn structure: user prompt, assistant response, optional tool-
   call sub-blocks, footer with token/cost from =session.end=.
 - Markdown rendering strategy: accumulate the current assistant turn
@@ -216,14 +214,13 @@ in-flight prompt.
   fontification via =markdown-fontify-code-blocks-natively=.
 - Caveman-mode terse output renders fine as markdown; no special case.
 - Diff rendering: caveman emits unified diffs in tool results; render
-  in a collapsible block using =diff-mode= fontification, the way
-  =agent-shell-diff.el= does.
+  in a collapsible block using =diff-mode= fontification.
 
 *Exit criteria:* a multi-turn session with code, diffs, and tool calls
-is readable and matches agent-shell's visual quality on a side-by-side.
+renders cleanly.
 
 ** M3 — Tool-call approvals :ui:safety:
-*Goal:* full permission UI parity with caveman's TUI and agent-shell.
+*Goal:* full permission UI parity with caveman's TUI.
 
 caveman emits a permission-prompt event when a tool needs approval
 (unless =--autopilot= is on). cavemacs must:
@@ -323,8 +320,7 @@ Customs (all =defcustom= in =cavemacs=):
 - =cavemacs-autopilot= → =--autopilot=
 - =cavemacs-plan-mode= → start session via =--plan=
 - =cavemacs-goal-mode= → =--goal "…"= (autonomous loop)
-- =cavemacs-environment= (alist of extra env vars, mirrors
-  =agent-shell-opencode-environment=)
+- =cavemacs-environment= (alist of extra env vars for the subprocess)
 
 Per-shell transient: =C-c C-o= in a cavemacs buffer opens a
 =transient= showing the *active* flags for the current process; some
@@ -348,8 +344,7 @@ from a menu.
 - GitHub Actions matrix: Emacs 30.2 on Linux + macOS.
 
 ** M8 — Documentation & release :docs:
-- =README.org=: install, quickstart, key bindings, custom variables,
-  comparison-with-agent-shell note (explain the protocol divergence).
+- =README.org=: install, quickstart, key bindings, custom variables.
 - =CHANGELOG.md=.
 - Submit to MELPA after a stable release.
 
