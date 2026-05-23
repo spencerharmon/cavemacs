@@ -326,6 +326,21 @@ boundaries quickly."
            (unless (eq (char-before) ?\n) (insert "\n"))
            (insert (propertize "──────────────────────────────────────\n"
                                'face 'cavemacs-meta-face))
+           ;; Actionable hint when the failure smells like a broken
+           ;; project-local extension.  Most users won't know
+           ;; --no-extensions exists; surfacing it inline saves a
+           ;; round-trip to caveman --help.
+           (when (string-match-p
+                  "Failed to load extension\\|Cannot find module"
+                  stderr)
+             (insert (propertize
+                      (concat
+                       "Hint: a project-local extension failed to load.  "
+                       "To start the session without extensions, set\n"
+                       "      (setq cavemacs-no-extensions t)\n"
+                       "and restart (C-c C-r).  Use M-x customize-group "
+                       "cavemacs to see all opt-outs.\n")
+                      'face 'cavemacs-meta-face)))
            (insert (propertize
                     "Run M-x cavemacs-shell-show-stderr for the full log, or \
 M-x cavemacs-shell-restart to start a new process.\n"
