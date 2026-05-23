@@ -1,0 +1,290 @@
+#+TITLE: cavemacs — Aesthetic Improvement Plan
+#+AUTHOR: Spencer Harmon
+#+STARTUP: overview
+#+OPTIONS: toc:2 num:nil
+
+A focused, 10-point plan for making cavemacs visually polished.
+
+Scoring rubric used to pick what's on the list:
+
+- *Impact* — how much does this change what the buffer looks like at a glance?
+- *Cost* — implementation effort, dependency footprint, breakage risk.
+- *Theming friendliness* — does it work across light/dark/random themes?
+
+Each item is roughly ordered by impact-per-cost.  The first three would
+move cavemacs from "functional but plain" to "people screenshot it."
+
+* 1. Replace prefix labels with iconography + boxed bubbles
+
+Currently a turn is laid out as:
+
+#+begin_src
+You
+say PING
+
+Assistant · github-copilot/gpt-4o
+PING
+── 33 in / 3 out / 2852 total · $0.0000
+#+end_src
+
+Two-line prefixes consume vertical space and don't visually separate
+turns.  Replace with single-line styled headers and an indented body,
+in the style of Slack / Discord:
+
+#+begin_src
+▌ ❯ you · 14:23
+│   say PING
+│
+▌ ✦ claude-sonnet-4.5 · github-copilot · 14:23 · 33↑ 3↓ · $0.0000
+│   PONG
+#+end_src
+
+Specifics:
+
+- =▌= (LEFT FIVE EIGHTHS BLOCK, U+258C) as a left rule, in a face
+  that's user-tinted (=cavemacs-user-rule-face=) vs.
+  agent-tinted (=cavemacs-assistant-rule-face=).
+- =│= continuation rule for the body lines.
+- Header line: role glyph + identity + provider + timestamp + per-turn
+  usage (tokens + cost), all in =cavemacs-meta-face= except the role
+  glyph.
+- Body: 4-space indent so code blocks and tables still look right.
+- A blank line between turns (no separator characters needed).
+
+Impact: high.  Cost: medium — requires reworking the renderer's
+=message_start= / =message_end= / =on-turn-end= and adding a per-turn
+timestamp.  Risk: minimal; pure presentation.
+
+* 2. Real markdown rendering, not just font-lock keywords
+
+Today =cavemacs-render--fontify-markdown= narrows to the assistant
+overlay and runs =font-lock-default-fontify-region= with markdown's
+keywords.  Output looks like *fontified text* but not like *rendered
+markdown* — no header sizes, list bullets, code-block backgrounds,
+table grids.
+
+Switch to a fuller render with =markdown-mode='s richer machinery:
+
+- =markdown-fontify-code-blocks-natively= → triple-backtick blocks get
+  per-language fontification via =org-src-font-lock-fontify-block=.
+- Set =markdown-hide-markup t= scoped to the assistant region so =**=
+  doesn't show but bold-faced runs do.
+- Apply =:height 1.4= / =1.2= / =1.05= scales to =markdown-header-face-1=
+  through =-3= for actual visual hierarchy.
+- Bullet lists: replace leading =- = / =* = with =• = via
+  =prettify-symbols-mode= (read-only display swap, no buffer mutation).
+- Tables: =markdown-mode='s table fontification kicks in once we use
+  its full setup.
+
+Impact: highest visual upgrade.  Cost: medium — needs care to scope
+all the fontification side-effects to the assistant overlay so they
+don't leak into the input area or the prompt furniture.
+
+* 3. Streaming-aware code blocks with a "language pill"
+
+Code is the most-rendered content in agent chat.  Today fenced code
+is just font-locked inline text.  Improvements:
+
+- A small inline =language= pill at the top-right of the block,
+  rendered with =:box=, e.g. ~[ elisp ]~ in a muted color.
+- Background color shift for the whole block, picked from
+  =shr-code= / =markdown-code-face= so it follows the theme.
+- A copy-to-kill-ring button at the end of the block (Emacs 30
+  supports inline buttons via =buttonize=).  =RET= on the button
+  fires =kill-new=.
+- During streaming, the block is rendered with a subtle "still
+  streaming" marker (a soft pulsing =▍= cursor at the end) until the
+  =text_end= delta lands.  Cheap with =run-with-idle-timer= toggling
+  =invisible= on a single character.
+
+Impact: high — code is what users care about.  Cost: medium.
+Risk: the pulsing cursor needs to be optional (=defcustom
+cavemacs-pretty-streaming-cursor t=) for accessibility / battery.
+
+* 4. Tool-call cards instead of inline grey text
+
+Right now a tool call renders as one line of grey text + an indented
+grey blob of result.  Promote them to visually distinct cards:
+
+#+begin_src
+╭─ ⚙ bash · 0.42s ─────────────────────╮
+│ $ ls -la                              │
+│ total 88                              │
+│ drwxr-xr-x  4 spencer spencer  4096 …│
+│ …                                     │
+╰───────────────────────────────────────╯
+#+end_src
+
+- Box-drawing borders (=╭ ─ ╮ │ ╰ ╯=) in =cavemacs-tool-rule-face=.
+- Tool name + duration (computed from
+  =tool_execution_start= and =tool_execution_end= timestamps) in
+  the header.
+- Distinct colors per tool family: file ops (read/edit/write) get
+  one tint, shell gets another, search (grep/find/ls) a third.
+- Errors get a red border, success gets the default rule color.
+- Collapsible: clicking the header (or =TAB= when point is on it)
+  hides the body.  Useful for sessions with many tool calls.
+
+Impact: high.  Cost: medium — needs an overlay-managed collapse
+state per tool block.
+
+* 5. Diff rendering with =diff-mode= faces
+
+When a tool result contains a unified diff (almost always =edit=
+results), recognize it and apply =diff-mode= font-lock so additions
+go green, deletions red, hunk headers cyan.  Inside the tool-call
+card from item 4.
+
+The recognition is cheap: =(string-match "^---\s+\\([^\n]+\\)\n\\+\\+\\+" text)=.
+If matched, narrow to the result region and call
+=diff-font-lock-flush=.
+
+Optional power-up: provide =RET= on a hunk header to jump into the
+target file at the right line.  This is a meaningful productivity
+gain on top of the cosmetic one.
+
+Impact: medium-high (only when there are edits, but then it's the
+single best thing you can do for the buffer).  Cost: low.
+
+* 6. Header-line per buffer with live status
+
+Replace the modeline-process tail with a proper =header-line-format=
+that sits at the top of every cavemacs buffer:
+
+#+begin_src
+ cavemacs   github-copilot/claude-sonnet-4.5   thinking: medium   $0.0234   ●  idle
+#+end_src
+
+Elements:
+
+- Project name.
+- Provider/model (clickable: opens the model picker).
+- Thinking level (clickable: cycles).
+- Cumulative session cost (sums from each =agent_end='s usage).
+- A status dot that color-changes: green idle, amber streaming, red
+  error.
+
+Use =header-line-format= rather than the modeline so the modeline
+stays free for normal Emacs use, and the status is always visible
+even when many cavemacs buffers are tiled.
+
+Impact: high — turns the buffer into a chat *app*, not just a buffer.
+Cost: low — pure display, hooks into existing event tally.
+
+* 7. Theme-aware colour set with light/dark auto-detect
+
+Today's faces inherit from generic font-lock faces, which means they
+read fine on any theme but never look *intentional*.  Define a small
+palette as defcustom:
+
+#+begin_src elisp
+(defcustom cavemacs-pretty-palette
+  '((user-rule  . "#f6c177")    ; warm amber
+    (asst-rule  . "#9ccfd8")    ; cool cyan
+    (tool-rule  . "#c4a7e7")    ; muted purple
+    (error-rule . "#eb6f92")    ; soft red
+    (meta-fg    . "#6e6a86")    ; low-contrast secondary text
+    (code-bg    . "#1f1d2e"))   ; subtle code-block background
+  "Palette used by cavemacs's pretty rendering.")
+#+end_src
+
+Provide two presets out of the box (=cavemacs-pretty-palette-dark=,
+=cavemacs-pretty-palette-light=) and an auto-detect that switches
+based on =(frame-parameter nil 'background-mode)=.
+
+Each face from items 1-6 should =:inherit= a base face but tint its
+=:foreground= / =:background= from this palette so it respects the
+user's theme while still having a coherent identity.
+
+Impact: high.  Cost: low.  Risk: a small one — defcustom palettes age
+poorly across theme changes; mitigated by the auto-detect + a hook
+that re-fontifies existing cavemacs buffers when =load-theme= fires.
+
+* 8. Variable-pitch prose + monospace code
+
+Read flow on chat is dramatically better with variable-pitch fonts
+for prose, fixed-pitch for code (the same trick =Info-mode=,
+=eww=, and =org-mode= use).
+
+Enable =buffer-face-mode= for the assistant body region (NOT the
+input area or tool cards), bound to a face that inherits
+=variable-pitch=.  Inside the body, code blocks (and inline =code=
+spans) re-pin themselves to =fixed-pitch= so alignment of code is
+preserved.
+
+The user-message body and tool-result blocks stay monospace because
+they're frequently code, paths, or shell output.
+
+Impact: medium-high — feels noticeably more "chat app."  Cost: low.
+Risk: tiny — gracefully degrades if the user doesn't have a sensible
+=variable-pitch= face configured.
+
+* 9. Avatars / role glyphs and per-role colour identity
+
+Borrow the chat-app affordance of a small consistent glyph + color
+per role:
+
+| Role          | Glyph | Color (dark theme) |
+|---------------+-------+--------------------|
+| You           | ❯ or 🪨 | warm amber       |
+| Assistant     | ✦       | cool cyan        |
+| Tool          | ⚙       | muted purple     |
+| System/notice | ●       | meta grey        |
+| Error         | ⚠       | soft red         |
+
+Inside the renderer these come from one =cavemacs-pretty-glyph= lookup
+function so they're customizable in one place.  Use the same colors
+as the rule lines from item 1 so the buffer feels colour-coordinated.
+
+Impact: medium.  Cost: trivial.
+
+* 10. Smooth scroll + smart fringe indicators
+
+Two small finishing touches that punch above their weight:
+
+- =(setq-local pixel-scroll-precision-mode t)= in
+  =cavemacs-shell-mode= for sub-line smooth scrolling of streaming
+  output.  Default Emacs jumps a whole line per
+  =message_update=; that flickers visibly during a fast token stream.
+- Fringe indicators on the left margin that mark turn boundaries
+  (small triangles) and tool-call positions (small gears).  Lets the
+  user scan a long session at a glance and jump to the previous
+  /next turn with =M-{= / =M-}=.
+
+Impact: medium (subtle but it's the kind of polish that says "this
+was crafted").  Cost: low.  Risk: pixel-scroll needs Emacs 29+ which
+we already require.
+
+* Implementation order recommendation
+
+If implementing incrementally, suggested merge order:
+
+1. *#7 (palette + theme-aware faces)* — defines the colors everything
+   else uses; cheapest to land first.
+2. *#1 (bubbles)* + *#9 (glyphs)* together — establish the chat
+   visual language.
+3. *#6 (header-line)* — instant "this is an app" upgrade.
+4. *#2 (full markdown)* + *#8 (variable-pitch)* — together they make
+   the assistant region feel like a rendered document.
+5. *#3 (code-block pill + copy button)* + *#4 (tool cards)* +
+   *#5 (diff faces)* — the trio that makes the buffer look like a
+   purpose-built chat UI rather than a text dump.
+6. *#10 (smooth scroll + fringe)* — final polish pass.
+
+Total: roughly 4-6 focused sessions of work.  None of this requires
+new external dependencies; all of it can land behind a
+=cavemacs-pretty-mode= toggle so users on TUI Emacs or with strong
+opinions about chrome can opt out.
+
+* Non-goals
+
+- *Icons that require an icon font* — keep it text-only.  Nerd Fonts
+  / =all-the-icons= dependencies are a maintenance + portability tax.
+  Unicode block-drawing + box drawing chars are universally
+  available in any Emacs build that supports UTF-8.
+- *GUI-only features* — everything in this plan works in terminal
+  Emacs (including =M-x emacsclient -nw=).
+- *Animation* — beyond the cursor blink in item 3, no animation.
+  Animated chrome in Emacs is almost always annoying.
+- *External web view* — no embedding =xwidget-webkit= or rendering
+  markdown via Pandoc.  Native Emacs all the way.
