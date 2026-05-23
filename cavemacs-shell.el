@@ -34,6 +34,12 @@
 (require 'cavemacs-render)
 (require 'cavemacs-project)
 
+;; Used by `cavemacs-shell-send' to intercept slash commands.  Required
+;; lazily inside the function to avoid a require cycle (cavemacs-commands
+;; declares this file's internals via declare-function).
+(declare-function cavemacs-commands-dispatch "cavemacs-commands" (input conn))
+(declare-function cavemacs-commands-setup-capf "cavemacs-commands" ())
+
 (defvar-local cavemacs-shell--conn nil
   "The `cavemacs-rpc-conn' for this buffer.")
 
@@ -71,6 +77,7 @@ Takes one argument: the project name."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "RET")     #'cavemacs-shell-send-or-newline)
     (define-key map (kbd "M-RET")   #'cavemacs-shell-insert-newline)
+    (define-key map (kbd "TAB")     #'completion-at-point)
     (define-key map (kbd "C-c C-c") #'cavemacs-shell-abort)
     (define-key map (kbd "C-c C-k") #'cavemacs-shell-abort)
     (define-key map (kbd "C-c C-n") #'cavemacs-shell-new-session-in-buffer)
@@ -93,6 +100,11 @@ Takes one argument: the project name."
               scroll-conservatively 101
               scroll-margin 0)
   (setq-local mode-line-process '(:eval (cavemacs-shell--mode-line)))
+  ;; Slash-command completion.  Loaded lazily; if cavemacs-commands is
+  ;; already on the load path (it is, since cavemacs.el requires it),
+  ;; this is a no-op.
+  (require 'cavemacs-commands)
+  (cavemacs-commands-setup-capf)
   (add-hook 'kill-buffer-hook #'cavemacs-shell--on-kill nil t))
 
 (defun cavemacs-shell--mode-line ()
@@ -282,7 +294,18 @@ Layout (top to bottom):
    (t (newline))))
 
 (defun cavemacs-shell-send ()
-  "Send the contents of the input area to caveman as a `prompt' command."
+  "Send the contents of the input area.
+
+If the input starts with \"/<name>\" and <name> is a cavemacs
+built-in command (see `cavemacs-commands--builtins'), dispatch it
+locally via the appropriate RPC verb instead of sending the literal
+text as a `prompt' (caveman's `prompt' handler does not run
+built-in slash commands in --mode rpc; the LLM would just answer
+them as plain text).
+
+User-defined slash commands (extensions/prompt-templates/skills)
+are sent as a `prompt' -- caveman's RPC handler dispatches them
+itself."
   (interactive)
   (unless (cavemacs-rpc-live-p cavemacs-shell--conn)
     (user-error "cavemacs: RPC connection is not live"))
@@ -290,13 +313,19 @@ Layout (top to bottom):
     (when (or (null text) (string-empty-p text))
       (user-error "cavemacs: nothing to send"))
     (cavemacs-shell--clear-input)
-    ;; Caveman will emit `message_start' for the user message, which
-    ;; the renderer turns into the visible "You ..." block.  We do
-    ;; *not* echo locally: a second echo would double-render.
-    (cavemacs-rpc-send cavemacs-shell--conn "prompt" :message text)
-    (cavemacs-shell--set-mode-info "sent")
-    ;; Park point in the now-empty input area so the user can keep typing
-    ;; and so `(eobp)' will be true on the next RET.
+    (cond
+     ;; Local dispatch for built-in slash commands.
+     ((progn (require 'cavemacs-commands)
+             (cavemacs-commands-dispatch text cavemacs-shell--conn))
+      (cavemacs-shell--set-mode-info "idle"))
+     ;; Everything else: send as a prompt.  Caveman will emit
+     ;; `message_start' for the user message, which the renderer
+     ;; turns into the visible "You ..." block.
+     (t
+      (cavemacs-rpc-send cavemacs-shell--conn "prompt" :message text)
+      (cavemacs-shell--set-mode-info "sent")))
+    ;; Park point in the now-empty input area so the user can keep
+    ;; typing and so `(eobp)' will be true on the next RET.
     (goto-char (point-max))))
 
 (defun cavemacs-shell-abort ()

@@ -107,6 +107,7 @@ In a =cavemacs-shell-mode= buffer:
 |-----------+-------------------------------------------------|
 | =RET=     | Send buffered input (at EOB) / newline (mid-buf)|
 | =M-RET=   | Insert literal newline                          |
+| =TAB=     | Complete a slash command (after typing =/=)     |
 | =C-c C-c= | Abort the current run                           |
 | =C-c C-n= | Reset the session (=new_session=) in-place      |
 | =C-c C-l= | Clear rendered output                           |
@@ -114,6 +115,34 @@ In a =cavemacs-shell-mode= buffer:
 | =C-c C-q= | Stop process and kill buffer                    |
 | =C-c C-o= | Open flags transient (model, thinking, etc.)    |
 | =C-c C-p= | Pick a slash command from the registered list   |
+
+* Slash commands
+
+Type =/= in the input area and =TAB= (or any =completion-at-point=
+front-end -- Corfu, Company, etc.) to see the available commands.
+
+Cavemacs ships its own built-in handlers (caveman's TUI built-ins
+don't work over =--mode rpc=; they would be sent to the LLM as plain
+text):
+
+| Command   | Action                                       |
+|-----------+----------------------------------------------|
+| =/help=   | Show the list of built-ins inline            |
+| =/model=  | Pick a model from a completing-read list     |
+| =/thinking <level>= | =off= / =minimal= / =low= / =medium= / =high= / =xhigh= |
+| =/compact [hint]= | Manually compact the session context |
+| =/new=, =/clear= | Reset the session in this buffer      |
+| =/name <text>= | Set the session display name            |
+| =/session= | Show session stats in a help buffer         |
+| =/export [path]= | Export the session to HTML            |
+| =/copy=   | Copy last assistant message to kill ring     |
+| =/bash <cmd>= | Run a shell command via caveman          |
+| =/abort=  | Cancel the current run                       |
+
+User-defined commands -- caveman extensions, prompt templates
+(=~/.cave/commands/*.md=, =.cave/commands/*.md=), and skills -- are
+auto-discovered via the =get_commands= RPC and appear in the same
+completion list.
 
 Outside any cavemacs buffer:
 

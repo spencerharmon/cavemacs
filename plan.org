@@ -3,9 +3,10 @@
 #+STARTUP: overview
 #+OPTIONS: toc:2 num:nil
 
-* Status: v0.1.0 SHIPPED; R1/R2 fixed in post-v0.1.0 patch
+* Status: v0.1.0 SHIPPED; R1/R2 fixed; M10 added in post-v0.1.0 patches
 
-All milestones M0–M8 complete.  M9 stretch deferred.  See =CHANGELOG.md=.
+All milestones M0–M8 complete plus M10 (slash command dispatch +
+in-prompt autocomplete).  M9 stretch deferred.  See =CHANGELOG.md=.
 
 Two interactive-only regressions discovered after the initial cut --
 R1 (upside-down layout) and R2 (RET stops sending after first prompt)
@@ -61,6 +62,82 @@ asserts `(eobp)' *without* a manual goto-char first.
 
 Fix: same as R1 (advance point + every window-point to the new
 point-max after each render insert, when the user was at the bottom).
+
+* M10 — Slash command dispatch + in-prompt autocomplete
+
+** Problem (discovered post-v0.1.0)
+
+Typing =/help= or =/model= in the input area sent the literal string
+as a `prompt' RPC.  The LLM dutifully answered the question in plain
+English ("Here are the tools and functionality you can use..."), but
+nothing happened mechanically: the model didn't change, the context
+didn't compact, the session didn't reset.
+
+Root cause: caveman's built-in slash commands (=/help=, =/model=,
+=/compact=, =/cost=, =/clear=, ~30 of them) are implemented in
+caveman's *interactive TUI input handler*, not in the agent loop.
+In =--mode rpc=, that handler is bypassed entirely.  Sending =/model=
+as a `prompt' is treated as user text, not a command.
+
+User-defined slash commands (extensions, prompt templates, skills)
+do work over RPC: caveman's `prompt' handler invokes them before
+forwarding to the LLM.  But those have to be installed by the user
+first; the built-ins were the missing piece.
+
+** Design
+
+Two pieces:
+
+*** Local dispatch
+
+A small built-in registry in =cavemacs-commands.el= maps the most
+important caveman built-ins to their direct RPC equivalents:
+
+| Slash    | RPC verb              |
+|----------+-----------------------|
+| /help    | (local, prints help)  |
+| /model   | get_available_models + set_model |
+| /thinking | set_thinking_level   |
+| /compact  | compact              |
+| /new, /clear | new_session       |
+| /name    | set_session_name      |
+| /session | get_session_stats     |
+| /export  | export_html           |
+| /copy    | get_last_assistant_text |
+| /bash    | bash                  |
+| /abort   | abort                 |
+
+`cavemacs-shell-send' calls `cavemacs-commands-dispatch' before
+sending; if the input parses as a known built-in, the handler runs
+and the input is *not* forwarded to the LLM.  Otherwise (regular
+prompts and user-defined slash commands alike), the text goes
+through to caveman's `prompt' RPC unchanged.
+
+*** In-prompt autocomplete via completion-at-point
+
+Adds `cavemacs-commands-capf' to the buffer's CAPF list.  Active
+when the input area starts with =/= and point is on the first word.
+Offers both built-in commands and user-defined commands (the latter
+fetched lazily via the `get_commands' RPC, cached for 5 seconds per
+buffer to avoid round-trip storms during typing).
+
+Works automatically with the default Emacs completion UI, Corfu,
+Company, and any other CAPF consumer.  =TAB= is bound to
+`completion-at-point' in cavemacs-shell-mode for users without a
+popup completion frontend.
+
+** Exit criteria (met)
+
+- =/help= in the input area shows the built-in command list inline.
+- =/model RET= opens a completing-read picker and switches models.
+- =/compact RET= triggers a real context compaction.
+- Typing =/= in an otherwise-empty input area + TAB shows
+  completion candidates with descriptions.
+- User-defined commands from =get_commands= appear in the
+  completion list alongside built-ins (when an extension or prompt
+  template is installed).
+- Regression tests cover the parser, dispatch decision, and CAPF
+  shape.
 
 * Overview
 
@@ -164,6 +241,17 @@ flag advertised in docs does not exist in this version of caveman.
 #+end_src
 
 * Milestones
+
+** New Milestone — M5.1: Tab-completion of slash commands :ui:
+*Goal:* Enable real-time tab-completion for slash commands using Emacs' built-in `completion-at-point` (CAPF).
+
+- Detect =/= at cursor position during input,
+  - Populate completions dynamically via CAPF,
+  - Auto-fetch descriptions from `~/.cave/commands/*.md`.
+- Investigate: get completions directly by asking caveman.
+- Leverage existing mechanism from M5 for slash commands table-driven logic.
+
+*Exit criteria:* User typing `/` receives proper completions for commands, their subargs dynamically filtered.
 
 ** M0 — Research & spike :setup:
 *Goal:* prove the transport works end-to-end from raw Elisp before
