@@ -39,6 +39,7 @@
 (require 'cavemacs-commands)
 (require 'cavemacs-cavekit)
 (require 'cavemacs-cavemem)
+(require 'cavemacs-caveman)
 (require 'cavemacs-flags)
 
 (defgroup cavemacs nil

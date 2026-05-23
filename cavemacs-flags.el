@@ -12,6 +12,11 @@
 (require 'cavemacs-tools)
 (require 'cavemacs-commands)
 
+(declare-function cavemacs-caveman-toggle "cavemacs-caveman" ())
+(declare-function cavemacs-caveman-cycle-level "cavemacs-caveman" (&optional reverse))
+(declare-function cavemacs-caveman-enable "cavemacs-caveman" (&optional level))
+(declare-function cavemacs-caveman-install "cavemacs-caveman" (&optional non-interactive))
+
 (defun cavemacs-flags--require-conn ()
   (unless (and (boundp 'cavemacs-shell--conn)
                (cavemacs-rpc-live-p cavemacs-shell--conn))
@@ -115,7 +120,10 @@
     ("Cycle thinking level" . cavemacs-flags-cycle-thinking)
     ("Toggle autopilot"     . cavemacs-flags-toggle-autopilot)
     ("Toggle auto-compact"  . cavemacs-flags-toggle-auto-compaction)
-    ("Compact now"          . cavemacs-flags-compact))
+    ("Compact now"          . cavemacs-flags-compact)
+    ("Caveman toggle"       . cavemacs-caveman-toggle)
+    ("Caveman cycle level"  . cavemacs-caveman-cycle-level)
+    ("Caveman install..."   . cavemacs-caveman-install))
   "Plain-list fallback menu used when `transient' is unavailable.")
 
 (defvar cavemacs-flags--transient-ok
@@ -133,7 +141,11 @@
                  ["Behaviour"
                   ("a" "Toggle autopilot"    cavemacs-flags-toggle-autopilot)
                   ("c" "Toggle auto-compact" cavemacs-flags-toggle-auto-compaction)
-                  ("C" "Compact now"         cavemacs-flags-compact)])
+                  ("C" "Compact now"         cavemacs-flags-compact)]
+                 ["Caveman skill"
+                  ("k" "Toggle caveman"      cavemacs-caveman-toggle)
+                  ("K" "Cycle level"         cavemacs-caveman-cycle-level)
+                  ("I" "Install..."          cavemacs-caveman-install)])
               t)
              t)
     (error nil))
