@@ -11,18 +11,6 @@
 (require 'cavemacs-shell)
 (require 'cavemacs-commands)
 
-;; Transient is loaded lazily inside `cavemacs-cavekit' so that we
-;; never expand `transient-define-prefix' against a stale (built-in)
-;; transient at load time.  This sidesteps the failure mode where
-;; Emacs 30's built-in transient (0.7.x) was loaded before
-;; straight.el's newer transient (0.13+); the macro expansion in the
-;; older transient does not emit calls to `transient--set-layout',
-;; while the newer macro does -- mixing them produces a `void-function'
-;; at runtime.
-
-(defvar cavemacs-cavekit--defined nil)
-(declare-function cavemacs-cavekit--prefix "cavemacs-cavekit" ())
-
 (defun cavemacs-cavekit--send (slash)
   "Send a cavekit slash command SLASH and submit."
   (cavemacs-commands-run slash))
@@ -49,28 +37,28 @@
          (path (expand-file-name "SPEC.md" root)))
     (find-file path)))
 
-(defun cavemacs-cavekit--ensure-defined ()
-  "Define the cavekit transient prefix on first use."
-  (unless cavemacs-cavekit--defined
-    (require 'transient)
-    (eval
-     '(transient-define-prefix cavemacs-cavekit--prefix ()
-        "Cavekit (spec-driven workflow) commands."
-        ["Workflow"
-         ("s" "/ck:spec  — create/amend/backprop SPEC.md"  cavemacs-cavekit-spec)
-         ("b" "/ck:build — execute next task against spec" cavemacs-cavekit-build)
-         ("c" "/ck:check — drift report"                   cavemacs-cavekit-check)]
-        ["Files"
-         ("o" "Open SPEC.md"                               cavemacs-cavekit-open-spec)])
-     t)
-    (setq cavemacs-cavekit--defined t)))
+(defconst cavemacs-cavekit--menu
+  '(("/ck:spec   create/amend/backprop SPEC.md"  . cavemacs-cavekit-spec)
+    ("/ck:build  execute next task against spec" . cavemacs-cavekit-build)
+    ("/ck:check  drift report"                   . cavemacs-cavekit-check)
+    ("Open SPEC.md"                              . cavemacs-cavekit-open-spec))
+  "Menu entries for `cavemacs-cavekit'.")
 
 ;;;###autoload
 (defun cavemacs-cavekit ()
-  "Open the cavekit transient menu."
+  "Pick a cavekit action.
+
+Uses `completing-read' rather than `transient' to avoid the
+load-order pitfall on Emacs 30, where the built-in transient 0.7
+gets loaded before straight.el's newer version, causing
+`transient-define-prefix' to expand into a `transient--set-layout'
+call that 0.7 does not provide."
   (interactive)
-  (cavemacs-cavekit--ensure-defined)
-  (call-interactively #'cavemacs-cavekit--prefix))
+  (let* ((choice (completing-read "cavekit: "
+                                  (mapcar #'car cavemacs-cavekit--menu)
+                                  nil t))
+         (fn (cdr (assoc choice cavemacs-cavekit--menu))))
+    (when fn (call-interactively fn))))
 
 (provide 'cavemacs-cavekit)
 ;;; cavemacs-cavekit.el ends here

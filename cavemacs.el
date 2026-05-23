@@ -3,7 +3,7 @@
 ;; Author: Spencer Harmon <spencer@spencerharmon.com>
 ;; URL: https://github.com/spencerharmon/cavemacs
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (markdown-mode "2.5") (transient "0.7"))
+;; Package-Requires: ((emacs "30.1") (markdown-mode "2.5"))
 ;; Keywords: tools, convenience, ai
 ;; SPDX-License-Identifier: MIT
 

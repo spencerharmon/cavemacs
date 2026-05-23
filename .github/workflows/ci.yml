@@ -18,7 +18,7 @@ jobs:
       - uses: purcell/setup-emacs@master
         with:
           version: ${{ matrix.emacs_version }}
-      - name: Install markdown-mode + transient
+      - name: Install markdown-mode
         run: |
           mkdir -p ~/.emacs.d/elpa
           emacs --batch \
@@ -26,8 +26,7 @@ jobs:
             --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)" \
             --eval "(package-initialize)" \
             --eval "(package-refresh-contents)" \
-            --eval "(package-install 'markdown-mode)" \
-            --eval "(package-install 'transient)"
+            --eval "(package-install 'markdown-mode)"
       - name: Byte-compile
         run: |
           emacs --batch -L . \
