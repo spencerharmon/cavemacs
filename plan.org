@@ -16,9 +16,39 @@ The notes below preserve the original plan for historical reference.
 Material corrections discovered during execution are flagged inline
 with =[CORRECTED]= markers.
 
-* Postmortem: R1 + R2 (interactive-only regressions)
+* Postmortem: R3 (silent upstream errors)
 
-** R1 — UI appeared upside-down
+Symptom: switching to `claude-opus-4.7` and prompting produced an
+empty assistant block.  Modeline went back to idle.  Nothing in
+=*Messages*=.  No indication anything had failed.
+
+Root cause: caveman emits a `message_end' event with
+`stopReason: "error"' and an `errorMessage' string field when a
+provider rejects the request.  cavemacs-render's
+`cavemacs-render--on-message-end' was ignoring both fields,
+treating the message as a normal (empty) completion.
+
+In this specific case Anthropic via Vertex/Copilot returned:
+  =400 invalid_request_error: "thinking.type.enabled" is not
+   supported for this model. Use "thinking.type.adaptive" and
+   "output_config.effort" to control thinking behavior.=
+
+The same pattern would hit any provider rejection -- rate limits,
+content filters, malformed bodies, model removed from the
+provider's catalog, etc.
+
+Fix: detect `stopReason="error"' in `on-message-end', extract
+`error.message' via `json-parse-string' from the trailing JSON,
+prepend a status code if present, and paint the result with the
+error face inside the assistant overlay.  Falls back to "⚠ <raw>"
+when the message doesn't parse as JSON.
+
+Not fixed (upstream issue): caveman defaults to
+`thinking.type=enabled', which newer Anthropic models reject.
+A workaround is to set thinking off before using those models
+(=M-x cavemacs-flags= → Set thinking level → off).
+
+* Postmortem: R1 + R2 (interactive-only regressions)** R1 — UI appeared upside-down
 
 Symptom: in interactive Emacs the buffer showed the banner at the top
 of the window and the prompt scrolled off the bottom.  Comparable
