@@ -119,12 +119,38 @@ This is the position immediately before the input prompt marker."
     (point-max)))
 
 (defmacro cavemacs-render--at-output (&rest body)
-  "Run BODY at the rendering insertion point, with inhibit-read-only."
+  "Run BODY at the rendering insertion point, with inhibit-read-only.
+
+After BODY, if point in the cavemacs buffer was at `point-max'
+before this macro fired (i.e., the user was parked in the input
+area), and the live windows showing this buffer also had their
+window-point at the buffer's old `point-max', then advance their
+window-points to the new `point-max'.  This is the chat/comint
+convention: the input prompt stays pinned to the bottom of the
+window and the user keeps typing where they were.
+
+Without this, `save-excursion' would put point back at its
+original *numeric* buffer position, which after a render insert
+is now in the middle of the rendered text, *before* the input
+area.  `(eobp)' would be false and `RET' would insert a newline
+instead of submitting the next prompt."
   (declare (indent 0) (debug t))
-  `(let ((inhibit-read-only t))
+  `(let* ((inhibit-read-only t)
+          (orig-point (point))
+          (was-at-end (= orig-point (point-max)))
+          (orig-window-points
+           (when was-at-end
+             (mapcar (lambda (w) (cons w (window-point w)))
+                     (get-buffer-window-list (current-buffer) nil t)))))
      (save-excursion
        (goto-char (cavemacs-render--insertion-point))
-       ,@body)))
+       ,@body)
+     (when was-at-end
+       (goto-char (point-max))
+       (dolist (entry orig-window-points)
+         (let ((w (car entry)) (wp (cdr entry)))
+           (when (and (window-live-p w) (= wp orig-point))
+             (set-window-point w (point-max))))))))
 
 (defun cavemacs-render--ensure-newline-before ()
   "Insert a newline before point unless we're at BOB or after a LF."

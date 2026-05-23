@@ -3,13 +3,64 @@
 #+STARTUP: overview
 #+OPTIONS: toc:2 num:nil
 
-* Status: v0.1.0 SHIPPED
+* Status: v0.1.0 SHIPPED; R1/R2 fixed in post-v0.1.0 patch
 
 All milestones M0–M8 complete.  M9 stretch deferred.  See =CHANGELOG.md=.
+
+Two interactive-only regressions discovered after the initial cut --
+R1 (upside-down layout) and R2 (RET stops sending after first prompt)
+-- are both fixed; see the postmortem below.
 
 The notes below preserve the original plan for historical reference.
 Material corrections discovered during execution are flagged inline
 with =[CORRECTED]= markers.
+
+* Postmortem: R1 + R2 (interactive-only regressions)
+
+** R1 — UI appeared upside-down
+
+Symptom: in interactive Emacs the buffer showed the banner at the top
+of the window and the prompt scrolled off the bottom.  Comparable
+interfaces (caveman's TUI, browser chat, every Emacs comint-derived
+shell) put the prompt at the bottom of the visible window with the
+most recent message just above it.
+
+Root cause: the buffer's *content* order was already correct (oldest
+turn first, newest turn just above the separator+prompt).  But the
+window's default scroll position was BOB, so the prompt was off the
+bottom of the visible area.  The interactive tests caught it, the
+batch tests (which never displayed the buffer in a window) did not.
+
+Fix: in `cavemacs-shell-mode' set the standard comint scroll settings
+(`scroll-conservatively' 101, `scroll-margin' 0).  And in
+`cavemacs-render--at-output' detect when point is at point-max
+*before* a render insert and advance it (plus every live window's
+window-point) to the new point-max *after* the insert.  Result:
+typing input area stays pinned to the bottom of the window; new
+turns render just above it; older turns scroll up out of view.
+
+** R2 — RET stopped sending after the first prompt
+
+Symptom: after the first response rendered, hitting RET in the input
+area inserted a literal newline instead of submitting.  Could only
+send the very first prompt.
+
+Root cause: `save-excursion' in `cavemacs-render--at-output' restores
+point by its *numeric position*, not by trailing-the-tail.  When the
+user's point was at point-max during a streaming render, save-excursion
+snapshotted the numeric position; the renderer then inserted text
+*before* that position; after restore, point was now in the middle of
+the rendered output, *not* at point-max.  `(eobp)' returned nil, and
+`cavemacs-shell-send-or-newline' fell through to its `(newline)' branch.
+
+Why batch tests missed it: every batch test explicitly did
+`(goto-char (point-max))' before each `cavemacs-shell-send', which
+papered over the issue.  The stricter regression test added with the
+fix uses `(call-interactively #'cavemacs-shell-send-or-newline)' and
+asserts `(eobp)' *without* a manual goto-char first.
+
+Fix: same as R1 (advance point + every window-point to the new
+point-max after each render insert, when the user was at the bottom).
 
 * Overview
 

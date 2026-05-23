@@ -86,8 +86,12 @@ Takes one argument: the project name."
   (setq-local truncate-lines nil
               word-wrap t
               indent-tabs-mode nil
-              ;; Ensure the rendered output above the prompt is read-only.
-              inhibit-field-text-motion t)
+              inhibit-field-text-motion t
+              ;; Chat-style scroll: keep point pinned to the bottom of
+              ;; the window so the input area is always visible.  These
+              ;; are the standard comint settings.
+              scroll-conservatively 101
+              scroll-margin 0)
   (setq-local mode-line-process '(:eval (cavemacs-shell--mode-line)))
   (add-hook 'kill-buffer-hook #'cavemacs-shell--on-kill nil t))
 

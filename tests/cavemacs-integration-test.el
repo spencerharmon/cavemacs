@@ -94,11 +94,15 @@ RET must still send the next prompt (not just insert a newline)."
              (lambda (e)
                (when (equal (alist-get 'type e) "agent_end")
                  (cl-incf turn-count)))))
-          ;; First send.
+          ;; First send -- use the interactive RET path, not
+          ;; cavemacs-shell-send directly.  The bug we're guarding
+          ;; against (R2 in plan.org) only manifests via the
+          ;; interactive path because it depends on point's state
+          ;; after async render insertions.
           (with-current-buffer buf
             (goto-char (point-max))
             (insert "say PING")
-            (cavemacs-shell-send))
+            (call-interactively #'cavemacs-shell-send-or-newline))
           (cavemacs-integration-test--wait-for
            buf (lambda () (>= turn-count 1)) 60)
           (should (>= turn-count 1))
@@ -107,15 +111,18 @@ RET must still send the next prompt (not just insert a newline)."
                     (save-excursion (goto-char (point-min))
                                     (search-forward "PING" nil t))))
           ;; After first turn: input area must be empty, point-max
-          ;; must be at the user-editable position.
+          ;; must be at the user-editable position.  Critically, we
+          ;; do *not* manually goto-char here -- the renderer must
+          ;; have left point at point-max on its own (otherwise the
+          ;; interactive RET-to-send flow breaks).
           (with-current-buffer buf
             (should (string-empty-p (or (cavemacs-shell--input-text) "")))
-            (goto-char (point-max))
             (should (eobp))
             (should (>= (point) (marker-position
                                  cavemacs-shell--input-start-marker)))
             (insert "say PONG")
-            (cavemacs-shell-send))
+            (should (eobp))
+            (call-interactively #'cavemacs-shell-send-or-newline))
           (cavemacs-integration-test--wait-for
            buf (lambda () (>= turn-count 2)) 60)
           (should (>= turn-count 2))
