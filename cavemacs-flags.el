@@ -16,6 +16,7 @@
 (declare-function cavemacs-caveman-cycle-level "cavemacs-caveman" (&optional reverse))
 (declare-function cavemacs-caveman-enable "cavemacs-caveman" (&optional level))
 (declare-function cavemacs-caveman-install "cavemacs-caveman" (&optional non-interactive))
+(declare-function cavemacs-pretty-state-put "cavemacs-pretty" (key value))
 
 (defun cavemacs-flags--require-conn ()
   (unless (and (boundp 'cavemacs-shell--conn)
@@ -76,12 +77,20 @@
       (let* ((m (cdr (assoc choice table))))
         (cavemacs-rpc-request
          cavemacs-shell--conn "set_model"
-         (lambda (r)
-           (if (eq (alist-get 'success r) t)
-               (message "cavemacs: model -> %s/%s"
-                        (alist-get 'provider m) (alist-get 'id m))
-             (message "cavemacs: set_model failed: %s"
-                      (alist-get 'error r))))
+         (let ((buf (current-buffer)))
+           (lambda (r)
+             (if (eq (alist-get 'success r) t)
+                 (progn
+                   (when (buffer-live-p buf)
+                     (with-current-buffer buf
+                       (cavemacs-pretty-state-put
+                        :provider (alist-get 'provider m))
+                       (cavemacs-pretty-state-put
+                        :model (alist-get 'id m))))
+                   (message "cavemacs: model -> %s/%s"
+                            (alist-get 'provider m) (alist-get 'id m)))
+               (message "cavemacs: set_model failed: %s"
+                        (alist-get 'error r)))))
          :provider (alist-get 'provider m)
          :modelId  (alist-get 'id m))))))
 

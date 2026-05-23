@@ -157,7 +157,8 @@ header can find its body without walking the buffer.")
         cavemacs-render--tool-start-times (make-hash-table :test 'equal)
         cavemacs-render--meta nil
         cavemacs-render--collapsed (make-hash-table :test 'equal)
-        cavemacs-render--collapse-overlays (make-hash-table :test 'equal)))
+        cavemacs-render--collapse-overlays (make-hash-table :test 'equal))
+  (add-to-invisibility-spec 'cavemacs-collapse))
 
 ;; -----------------------------------------------------------------------------
 ;; Collapsibility (M11)

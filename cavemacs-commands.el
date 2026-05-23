@@ -44,6 +44,7 @@
 ;; `cavemacs-commands-dispatch' on every send, and we need access to
 ;; shell internals without forming a require cycle.
 (declare-function cavemacs-render--notice "cavemacs-render" (text &optional face))
+(declare-function cavemacs-pretty-state-put "cavemacs-pretty" (key value))
 (defvar cavemacs-shell--conn)
 (defvar cavemacs-shell--input-start-marker)
 
@@ -75,15 +76,23 @@
           (let ((m (cdr (assoc choice table))))
             (cavemacs-rpc-request
              conn "set_model"
-             (lambda (r)
-               (if (eq (alist-get 'success r) t)
+             (let ((buf (cavemacs-rpc-conn-owner-buffer conn)))
+               (lambda (r)
+                 (if (eq (alist-get 'success r) t)
+                     (progn
+                       (when (buffer-live-p buf)
+                         (with-current-buffer buf
+                           (cavemacs-pretty-state-put
+                            :provider (alist-get 'provider m))
+                           (cavemacs-pretty-state-put
+                            :model (alist-get 'id m))))
+                       (cavemacs-render--notice
+                        (format "model -> %s/%s"
+                                (alist-get 'provider m) (alist-get 'id m))
+                        'cavemacs-meta-face))
                    (cavemacs-render--notice
-                    (format "model -> %s/%s"
-                            (alist-get 'provider m) (alist-get 'id m))
-                    'cavemacs-meta-face)
-                 (cavemacs-render--notice
-                  (format "set_model failed: %s" (alist-get 'error r))
-                  'cavemacs-error-face)))
+                    (format "set_model failed: %s" (alist-get 'error r))
+                    'cavemacs-error-face))))
              :provider (alist-get 'provider m)
              :modelId  (alist-get 'id m)))))))
   t)
