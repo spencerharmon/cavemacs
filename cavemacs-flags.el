@@ -116,21 +116,44 @@
     ("Toggle autopilot"     . cavemacs-flags-toggle-autopilot)
     ("Toggle auto-compact"  . cavemacs-flags-toggle-auto-compaction)
     ("Compact now"          . cavemacs-flags-compact))
-  "Menu entries for `cavemacs-flags'.")
+  "Plain-list fallback menu used when `transient' is unavailable.")
+
+(defvar cavemacs-flags--transient-ok
+  (condition-case nil
+      (progn (require 'transient)
+             (eval
+              '(transient-define-prefix cavemacs-flags--prefix ()
+                 "Per-session model, thinking, and behaviour flags."
+                 ["Model"
+                  ("m" "Pick model"          cavemacs-flags-pick-model)
+                  ("M" "Cycle model"         cavemacs-flags-cycle-model)]
+                 ["Thinking"
+                  ("t" "Set level"           cavemacs-flags-set-thinking)
+                  ("T" "Cycle level"         cavemacs-flags-cycle-thinking)]
+                 ["Behaviour"
+                  ("a" "Toggle autopilot"    cavemacs-flags-toggle-autopilot)
+                  ("c" "Toggle auto-compact" cavemacs-flags-toggle-auto-compaction)
+                  ("C" "Compact now"         cavemacs-flags-compact)])
+              t)
+             t)
+    (error nil))
+  "Non-nil when `transient' loaded and our prefix compiled cleanly.")
+
+(declare-function cavemacs-flags--prefix "cavemacs-flags" ())
 
 ;;;###autoload
 (defun cavemacs-flags ()
-  "Pick a per-session flag/action.
+  "Open the per-session flags menu.
 
-Uses `completing-read' rather than `transient' to remain compatible
-with all Emacs 30 transient versions; see cavemacs-cavekit.el for
-the load-order rationale."
+Uses `transient' when available; falls back to `completing-read'."
   (interactive)
-  (let* ((choice (completing-read "cavemacs flag: "
-                                  (mapcar #'car cavemacs-flags--menu)
-                                  nil t))
-         (fn (cdr (assoc choice cavemacs-flags--menu))))
-    (when fn (call-interactively fn))))
+  (if cavemacs-flags--transient-ok
+      (call-interactively #'cavemacs-flags--prefix)
+    (let* ((choice (completing-read "cavemacs flag: "
+                                    (mapcar #'car cavemacs-flags--menu)
+                                    nil t))
+           (fn (cdr (assoc choice cavemacs-flags--menu))))
+      (when fn (call-interactively fn)))))
 
 ;; Bind into the shell map at load time.
 (with-eval-after-load 'cavemacs-shell
