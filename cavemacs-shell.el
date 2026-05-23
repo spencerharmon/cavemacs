@@ -189,13 +189,25 @@ resume an on-disk session."
           (cavemacs-project-name root)))
 
 (defun cavemacs-shell--insert-banner (root)
-  "Insert a welcome banner."
-  (let ((inhibit-read-only t))
-    (insert (propertize
-             (format "cavemacs %s — caveman session for %s\n\n"
-                     (or (and (boundp 'cavemacs-version) cavemacs-version) "?")
-                     (abbreviate-file-name root))
-             'face 'cavemacs-meta-face))))
+  "Insert a welcome banner.
+
+Includes the resolved project root and the exact argv we pass to
+caveman.  When users hit cryptic startup failures (an extension
+loaded from a path that surprises them, an auth error against an
+unexpected provider, etc.) the banner is the single source of
+truth for what cavemacs handed to the subprocess."
+  (let ((inhibit-read-only t)
+        (args (ignore-errors (cavemacs--default-process-args))))
+    (insert
+     (propertize
+      (concat
+       (format "cavemacs %s — caveman session\n"
+               (or (and (boundp 'cavemacs-version) cavemacs-version) "?"))
+       (format "  project root : %s\n" (abbreviate-file-name root))
+       (format "  argv         : caveman %s\n"
+               (mapconcat #'identity (or args '("--mode" "rpc")) " "))
+       "\n")
+      'face 'cavemacs-meta-face))))
 
 (defun cavemacs-shell--install-prompt ()
   "Insert the input-area separator and prompt prefix, and set markers.
