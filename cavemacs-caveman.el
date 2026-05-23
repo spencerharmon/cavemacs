@@ -87,11 +87,18 @@ cavemacs release."
 
 (defcustom cavemacs-caveman-skill-paths
   '(("project" . ".cave/skills/caveman/SKILL.md")
-    ("global"  . "~/.cave/skills/caveman/SKILL.md"))
+    ("global"  . "~/.cave/agent/skills/caveman/SKILL.md"))
   "Where to look for caveman's SKILL.md, in priority order.
 
 Project-relative entries are resolved against the current
-cavemacs project root."
+cavemacs project root.  Defaults match caveman-code's skill
+discovery paths:
+
+  - project: <cwd>/.cave/skills/caveman/SKILL.md
+  - global:  ~/.cave/agent/skills/caveman/SKILL.md
+
+(See caveman-code's packages/coding-agent/src/core/skills.ts ->
+`loadSkills' for the canonical lookup order.)"
   :type '(alist :key-type string :value-type string)
   :group 'cavemacs-caveman)
 
@@ -99,19 +106,45 @@ cavemacs project root."
   "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh"
   "URL or absolute path to caveman's install.sh.
 
-Set to nil to disable the in-Emacs installer.  When non-nil and
-not an existing local file, the installer is fetched with
-`url-retrieve-synchronously' and piped to bash via a transient
-compilation buffer so the user can audit the output."
+Used by `cavemacs-caveman-install-via-installer'.  Set to nil to
+disable the installer entirely.
+
+Note: as of upstream caveman 1.8.2 the installer's --only flag
+does *not* accept \"caveman-code\" as an agent target -- the
+installer only knows about Claude Code, Codex, Gemini, Cursor,
+etc.  Prefer `cavemacs-caveman-install' (the default
+M-x entry point), which fetches just SKILL.md and drops it into
+caveman-code's global skill discovery path."
   :type '(choice (const :tag "Disabled" nil) string)
   :group 'cavemacs-caveman)
 
-(defcustom cavemacs-caveman-install-scope "caveman-code"
+(defcustom cavemacs-caveman-skill-source
+  "https://raw.githubusercontent.com/JuliusBrussee/caveman/main/skills/caveman/SKILL.md"
+  "URL or absolute path to caveman's SKILL.md.
+
+Fetched by `cavemacs-caveman-install' and written into
+`cavemacs-caveman-global-skill-dir'.  Set to nil to disable the
+fetch-and-drop installer."
+  :type '(choice (const :tag "Disabled" nil) string)
+  :group 'cavemacs-caveman)
+
+(defcustom cavemacs-caveman-global-skill-dir
+  "~/.cave/agent/skills/caveman"
+  "Directory where `cavemacs-caveman-install' drops SKILL.md.
+
+Default matches caveman-code's user-skills discovery path
+(~/.cave/agent/skills/<name>/SKILL.md per the caveConfig
+configDir of \".cave\")."
+  :type 'directory
+  :group 'cavemacs-caveman)
+
+(defcustom cavemacs-caveman-install-scope "claude"
   "Value passed to caveman's installer --only flag.
 
-The default scopes the installer to the caveman-code agent only,
-so it never touches Claude Code / Codex / Cursor on the same
-machine."
+Only used by `cavemacs-caveman-install-via-installer'.  Default
+is \"claude\" because the upstream installer does not (yet)
+support caveman-code as an --only target.  See
+`cavemacs-caveman-install' for the caveman-code path."
   :type 'string
   :group 'cavemacs-caveman)
 
@@ -380,18 +413,79 @@ cavemacs-caveman is required, without any user action."
 ;; -----------------------------------------------------------------------------
 
 ;;;###autoload
-(defun cavemacs-caveman-install (&optional non-interactive)
-  "Run caveman's install.sh, scoped to caveman-code only.
+(defun cavemacs-caveman-install ()
+  "Install the caveman skill into caveman-code's global skills directory.
 
-Source is `cavemacs-caveman-install-source' (URL or local path);
-scope flag value is `cavemacs-caveman-install-scope'.  Output is
-shown in a `*cavemacs-caveman-install*' compilation buffer so the
-user can audit the script's progress.
+Fetches `cavemacs-caveman-skill-source' (default: SKILL.md from
+upstream main) and writes it to
+`cavemacs-caveman-global-skill-dir'/SKILL.md so caveman-code's
+skill loader picks it up on next startup.
+
+This is the right path for caveman-code today; the upstream
+caveman installer's --only flag does not yet recognize
+caveman-code as an agent target, so the curl|bash route does
+not help.  Use `cavemacs-caveman-install-via-installer' if you
+want to install for *other* agents (Claude Code, Codex, ...) on
+the same machine.
+
+Asks for confirmation before writing.  Restart caveman with
+\\[cavemacs-shell-restart] afterwards."
+  (interactive)
+  (unless cavemacs-caveman-skill-source
+    (user-error "cavemacs-caveman-skill-source is nil; installer disabled"))
+  (let* ((dir (expand-file-name cavemacs-caveman-global-skill-dir))
+         (dest (expand-file-name "SKILL.md" dir)))
+    (when (or (not (file-exists-p dest))
+              (yes-or-no-p (format "%s exists.  Overwrite? " dest)))
+      (unless (yes-or-no-p
+               (format "Fetch %s -> %s? "
+                       cavemacs-caveman-skill-source dest))
+        (user-error "Aborted"))
+      (make-directory dir t)
+      (cavemacs-caveman--fetch-skill cavemacs-caveman-skill-source dest)
+      (message
+       "cavemacs-caveman: wrote %s.  Restart caveman (C-c C-r) to load it."
+       dest))))
+
+(defun cavemacs-caveman--fetch-skill (src dest)
+  "Fetch SRC into DEST.  SRC is a URL or a local file path."
+  (cond
+   ;; Local file: just copy.
+   ((and (not (string-match-p "\\`[a-z]+://" src))
+         (file-exists-p src))
+    (copy-file src dest t))
+   ;; Remote URL: url-retrieve-synchronously, strip HTTP headers.
+   (t
+    (require 'url)
+    (let ((buf (url-retrieve-synchronously src t t 30)))
+      (unless buf
+        (user-error "cavemacs-caveman: failed to fetch %s" src))
+      (with-current-buffer buf
+        (goto-char (point-min))
+        (unless (re-search-forward "\n\n" nil t)
+          (user-error
+           "cavemacs-caveman: malformed HTTP response from %s" src))
+        (let ((coding-system-for-write 'utf-8))
+          (write-region (point) (point-max) dest))
+        (kill-buffer buf))))))
+
+;;;###autoload
+(defun cavemacs-caveman-install-via-installer (&optional non-interactive)
+  "Run caveman's upstream install.sh as a subprocess.
+
+Source is `cavemacs-caveman-install-source'; scope flag value is
+`cavemacs-caveman-install-scope' (default \"claude\").
+
+Note: as of caveman 1.8.2 the installer's --only flag does NOT
+support \"caveman-code\".  For installing into caveman-code use
+`cavemacs-caveman-install' instead, which writes SKILL.md
+directly to caveman-code's global skills directory.
+
+Output is shown in a `*cavemacs-caveman-install*' compilation
+buffer so the user can audit the script's progress.
 
 When called interactively, asks for confirmation first.  Pass
-NON-INTERACTIVE non-nil to skip the prompt (intended for batch
-scenarios; refuses if `cavemacs-caveman-install-source' is nil
-either way)."
+NON-INTERACTIVE non-nil to skip the prompt."
   (interactive)
   (unless cavemacs-caveman-install-source
     (user-error "cavemacs-caveman-install-source is nil; installer disabled"))
@@ -406,7 +500,7 @@ either way)."
              ((and (not (string-match-p "\\`[a-z]+://" src))
                    (file-exists-p src))
               src)
-             (t (cavemacs-caveman--fetch-installer src))))
+             (t (cavemacs-caveman--fetch-installer-script src))))
            (default-directory (or (ignore-errors (cavemacs-project-root))
                                   default-directory))
            (buf (get-buffer-create "*cavemacs-caveman-install*")))
@@ -425,10 +519,10 @@ either way)."
                      (insert (format "\n-- installer %s --\n"
                                      (string-trim event))))))
       (pop-to-buffer buf)
-      (message "cavemacs-caveman: installer running; pull C-c C-r after it finishes to restart caveman"))))
+      (message "cavemacs-caveman: installer running"))))
 
-(defun cavemacs-caveman--fetch-installer (url)
-  "Download URL into a temp file and return the path.  Errors on failure."
+(defun cavemacs-caveman--fetch-installer-script (url)
+  "Download URL into a temp .sh file and return the path."
   (require 'url)
   (let* ((tmp (make-temp-file "cavemacs-caveman-install-" nil ".sh"))
          (buf (url-retrieve-synchronously url t t 30)))
