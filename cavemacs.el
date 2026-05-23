@@ -31,6 +31,7 @@
 (require 'cavemacs-config)
 (require 'cavemacs-rpc)
 (require 'cavemacs-project)
+(require 'cavemacs-pretty)
 (require 'cavemacs-render)
 (require 'cavemacs-shell)
 (require 'cavemacs-tools)

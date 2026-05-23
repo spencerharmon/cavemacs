@@ -31,6 +31,7 @@
 (require 'subr-x)
 (require 'cavemacs-config)
 (require 'cavemacs-rpc)
+(require 'cavemacs-pretty)
 (require 'cavemacs-render)
 (require 'cavemacs-project)
 
@@ -92,6 +93,10 @@ Takes one argument: the project name."
     (define-key map (kbd "C-c C-s") #'cavemacs-shell-show-state)
     (define-key map (kbd "C-c C-l") #'cavemacs-shell-clear-output)
     (define-key map (kbd "C-c C-q") #'cavemacs-shell-quit)
+    (define-key map (kbd "C-c C-e") #'cavemacs-shell-show-stderr)
+    (define-key map (kbd "C-c C-r") #'cavemacs-shell-restart)
+    (define-key map (kbd "M-{")     #'cavemacs-render-previous-turn)
+    (define-key map (kbd "M-}")     #'cavemacs-render-next-turn)
     map)
   "Keymap for `cavemacs-shell-mode'.")
 
@@ -120,6 +125,7 @@ Takes one argument: the project name."
   ;; the user may want it elsewhere -- just its TAB binding in this
   ;; buffer.
   (cavemacs-shell--neutralize-rival-tab-bindings)
+  (cavemacs-pretty-maybe-enable)
   (add-hook 'kill-buffer-hook #'cavemacs-shell--on-kill nil t))
 
 (defun cavemacs-shell--neutralize-rival-tab-bindings ()
@@ -142,6 +148,12 @@ Adds a buffer-local override so even modes that bind TAB via
 
 (defun cavemacs-shell--set-mode-info (text)
   (setq cavemacs-shell--mode-line-info text)
+  ;; Mirror coarse state into the pretty header-line dot.
+  (when (boundp 'cavemacs-pretty--header-state)
+    (cavemacs-pretty-state-put
+     :status (cond ((string-match-p "exited\\|error" text) 'error)
+                   ((string-match-p "idle\\|reset"  text) 'idle)
+                   (t 'busy))))
   (force-mode-line-update))
 
 ;; -----------------------------------------------------------------------------
@@ -163,6 +175,9 @@ resume an on-disk session."
       (setq cavemacs-shell--project-root root
             default-directory root)
       (cavemacs-render-init-buffer)
+      (cavemacs-pretty-state-put :project (cavemacs-project-name root))
+      (when cavemacs-thinking-level
+        (cavemacs-pretty-state-put :thinking cavemacs-thinking-level))
       (cavemacs-shell--insert-banner root)
       (cavemacs-shell--install-prompt)
       (cavemacs-shell--start-process :session-file session-file))
@@ -284,8 +299,50 @@ Layout (top to bottom):
 (defun cavemacs-shell--on-kill ()
   "Tear down the RPC connection when the buffer is killed."
   (when cavemacs-shell--conn
-    (ignore-errors (cavemacs-rpc-stop cavemacs-shell--conn))
+    ;; Pass nil so the stderr buffer *is* killed at owner-buffer
+    ;; death (no longer needed for postmortem).
+    (ignore-errors (cavemacs-rpc-stop cavemacs-shell--conn nil))
     (setq cavemacs-shell--conn nil)))
+
+(defun cavemacs-shell-show-stderr ()
+  "Pop to the buffer containing caveman stderr for this session.
+
+After an abnormal exit, the stderr buffer is retained until the
+shell buffer itself is killed so users can inspect the failure."
+  (interactive)
+  (let ((buf (and cavemacs-shell--conn
+                  (cavemacs-rpc-stderr-buffer cavemacs-shell--conn))))
+    (unless (buffer-live-p buf)
+      (user-error "cavemacs: no stderr buffer available"))
+    (pop-to-buffer buf)
+    (goto-char (point-max))))
+
+(defun cavemacs-shell-restart ()
+  "Restart caveman in this buffer with the same args.
+
+Use this after \"command exited abnormally\".  Keeps the rendered
+history in the buffer; spawns a fresh subprocess and re-attaches."
+  (interactive)
+  (when (and cavemacs-shell--conn
+             (cavemacs-rpc-live-p cavemacs-shell--conn))
+    (ignore-errors (cavemacs-rpc-stop cavemacs-shell--conn nil)))
+  (setq cavemacs-shell--conn nil)
+  (cavemacs-pretty-state-put :status 'idle)
+  (cavemacs-shell--set-mode-info "restarting…")
+  (cavemacs-shell--start-process :session-file nil)
+  (message "cavemacs: restarting caveman"))
+
+(defun cavemacs-shell--require-live-conn ()
+  "Signal a helpful error if the RPC connection is dead.
+
+The message points users at the actionable next steps
+(M-x cavemacs-shell-show-stderr / M-x cavemacs-shell-restart),
+which is much friendlier than a bare \"RPC connection is not live\"
+that leaves users guessing what to do."
+  (unless (cavemacs-rpc-live-p cavemacs-shell--conn)
+    (user-error
+     "cavemacs: caveman process is not running.  %s"
+     "C-c C-e (show stderr) · C-c C-r (restart)")))
 
 ;; -----------------------------------------------------------------------------
 ;; Input handling
@@ -365,8 +422,7 @@ User-defined slash commands (extensions/prompt-templates/skills)
 are sent as a `prompt' -- caveman's RPC handler dispatches them
 itself."
   (interactive)
-  (unless (cavemacs-rpc-live-p cavemacs-shell--conn)
-    (user-error "cavemacs: RPC connection is not live"))
+  (cavemacs-shell--require-live-conn)
   (let ((text (cavemacs-shell--input-text)))
     (when (or (null text) (string-empty-p text))
       (user-error "cavemacs: nothing to send"))
@@ -404,8 +460,7 @@ Does not spawn a new buffer."
 (defun cavemacs-shell-show-state ()
   "Display the current `get_state' response in a help buffer."
   (interactive)
-  (unless (cavemacs-rpc-live-p cavemacs-shell--conn)
-    (user-error "Not connected"))
+  (cavemacs-shell--require-live-conn)
   (let ((resp (cavemacs-rpc-request-sync
                cavemacs-shell--conn "get_state" nil 10)))
     (with-help-window "*cavemacs-state*"

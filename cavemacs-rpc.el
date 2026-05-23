@@ -247,12 +247,27 @@ cancelled reply so caveman does not hang forever."
            (error nil)))
        (cavemacs-rpc-conn-pending conn))
       (clrhash (cavemacs-rpc-conn-pending conn))
-      ;; Notify owner buffer (if any) via a synthetic event.
-      (dolist (hook (cavemacs-rpc-conn-event-hooks conn))
-        (ignore-errors
-          (funcall hook `((type . "cavemacs_process_exited")
-                          (status . ,(symbol-name (process-status proc)))
-                          (event . ,(string-trim event)))))))))
+      ;; Snapshot the tail of stderr so the renderer can show users
+      ;; *why* caveman died (most exits are configuration / auth /
+      ;; "no such model" failures that print a clear message before
+      ;; exiting).  Without this the only signal users got was a
+      ;; bare "command exited abnormally" with no actionable detail.
+      (let* ((stderr-buf (cavemacs-rpc-conn-stderr-buffer conn))
+             (stderr-tail
+              (when (buffer-live-p stderr-buf)
+                (with-current-buffer stderr-buf
+                  (let* ((end (point-max))
+                         (beg (max (point-min) (- end 4000))))
+                    (string-trim (buffer-substring-no-properties beg end))))))
+             (exit-code (process-exit-status proc)))
+        ;; Notify owner buffer (if any) via a synthetic event.
+        (dolist (hook (cavemacs-rpc-conn-event-hooks conn))
+          (ignore-errors
+            (funcall hook `((type . "cavemacs_process_exited")
+                            (status . ,(symbol-name (process-status proc)))
+                            (exitCode . ,exit-code)
+                            (event . ,(string-trim event))
+                            (stderr . ,(or stderr-tail ""))))))))))
 
 ;; -----------------------------------------------------------------------------
 ;; Public API
@@ -303,10 +318,15 @@ OWNER-BUFFER is the cavemacs shell buffer that owns the connection."
   "Return non-nil if CONN's subprocess is still running."
   (and conn (process-live-p (cavemacs-rpc-conn-process conn))))
 
-(defun cavemacs-rpc-stop (conn)
+(defun cavemacs-rpc-stop (conn &optional keep-stderr)
   "Request graceful shutdown of CONN by closing its stdin.
 Caveman's RPC loop calls `process.exit(0)' when stdin ends.  If the
-process is still alive after a short grace period, it is killed."
+process is still alive after a short grace period, it is killed.
+
+When KEEP-STDERR is non-nil, the stderr buffer is NOT killed (so
+postmortem inspection via `cavemacs-rpc-stderr-buffer' is still
+possible).  Defaults to non-nil for safety -- the caller can pass
+nil explicitly when tearing down for good."
   (when (cavemacs-rpc-live-p conn)
     (ignore-errors
       (process-send-eof (cavemacs-rpc-conn-process conn)))
@@ -316,9 +336,16 @@ process is still alive after a short grace period, it is killed."
                   (< (float-time) deadline))
         (accept-process-output (cavemacs-rpc-conn-process conn) 0.1))
       (when (cavemacs-rpc-live-p conn)
-        (kill-process (cavemacs-rpc-conn-process conn))))
-    (when (buffer-live-p (cavemacs-rpc-conn-stderr-buffer conn))
+        (kill-process (cavemacs-rpc-conn-process conn)))))
+  (unless keep-stderr
+    (when (and conn (buffer-live-p (cavemacs-rpc-conn-stderr-buffer conn)))
       (kill-buffer (cavemacs-rpc-conn-stderr-buffer conn)))))
+
+(defun cavemacs-rpc-stderr-buffer (conn)
+  "Return the live stderr buffer for CONN, or nil."
+  (and conn
+       (buffer-live-p (cavemacs-rpc-conn-stderr-buffer conn))
+       (cavemacs-rpc-conn-stderr-buffer conn)))
 
 (defun cavemacs-rpc--write-raw (conn obj)
   "Send OBJ (already a complete envelope) to CONN's stdin."
