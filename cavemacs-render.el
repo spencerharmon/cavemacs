@@ -755,9 +755,12 @@ M-x cavemacs-shell-restart to start a new process.\n"
   "Apply markdown font-lock keywords to the region BEG..END."
   (save-restriction
     (narrow-to-region beg end)
-    (let ((font-lock-defaults (when (boundp 'markdown-mode-font-lock-keywords-basic)
-                                `(,markdown-mode-font-lock-keywords-basic
-                                  nil nil nil nil))))
+    (let* ((kw (cond
+                ((boundp 'markdown-mode-font-lock-keywords)
+                 (symbol-value 'markdown-mode-font-lock-keywords))
+                ((boundp 'markdown-mode-font-lock-keywords-basic)
+                 (symbol-value 'markdown-mode-font-lock-keywords-basic))))
+           (font-lock-defaults (and kw `(,kw nil nil nil nil))))
       (when font-lock-defaults
         (ignore-errors
           (font-lock-default-fontify-region (point-min) (point-max) nil))))))

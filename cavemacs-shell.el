@@ -130,6 +130,7 @@ Takes one argument: the project name."
   ;; buffer.
   (cavemacs-shell--neutralize-rival-tab-bindings)
   (cavemacs-pretty-maybe-enable)
+  (add-to-invisibility-spec 'cavemacs-collapse)
   (add-hook 'kill-buffer-hook #'cavemacs-shell--on-kill nil t))
 
 (defun cavemacs-shell--neutralize-rival-tab-bindings ()
