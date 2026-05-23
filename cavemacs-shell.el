@@ -97,6 +97,10 @@ Takes one argument: the project name."
     (define-key map (kbd "C-c C-r") #'cavemacs-shell-restart)
     (define-key map (kbd "M-{")     #'cavemacs-render-previous-turn)
     (define-key map (kbd "M-}")     #'cavemacs-render-next-turn)
+    (define-key map (kbd "C-a")     #'cavemacs-shell-beginning-of-line)
+    (define-key map (kbd "<home>")  #'cavemacs-shell-beginning-of-line)
+    (define-key map (kbd "C-c TAB") #'cavemacs-render-toggle-all)
+    (define-key map (kbd "C-c C-<tab>") #'cavemacs-render-toggle-all)
     map)
   "Keymap for `cavemacs-shell-mode'.")
 
@@ -379,6 +383,40 @@ that leaves users guessing what to do."
   "Insert a literal newline in the input area."
   (interactive)
   (insert "\n"))
+
+(defun cavemacs-shell-beginning-of-line (&optional arg)
+  "Move point to the first editable column of the input area.
+
+When point is inside the input area, jump to
+`cavemacs-shell--input-start-marker' (the column just after the
+prompt prefix) instead of column 0.  Column 0 is inside the
+read-only prompt characters (the separator and `> ' prefix) and
+landing there is confusing.
+
+When point is in the rendered-output region above the input
+area, behave as ordinary `move-beginning-of-line'.
+
+ARG is forwarded to `move-beginning-of-line' for ARG-line jumps
+in the output region; ignored in the input area.
+
+Respects `shift-select-mode': if invoked with a shift-translated
+binding (e.g. \\[universal-argument] then `C-S-a'), the mark is
+set and selection extended, matching the convention of other
+movement commands."
+  (interactive "^p")
+  (let ((input-start (and (boundp 'cavemacs-shell--input-start-marker)
+                          cavemacs-shell--input-start-marker
+                          (marker-position
+                           cavemacs-shell--input-start-marker))))
+    (cond
+     ;; Inside input area: jump to its first editable column.  We
+     ;; intentionally ignore ARG here; nobody types `C-u 3 C-a' to
+     ;; move three lines into a multi-line prompt.
+     ((and input-start (>= (point) input-start))
+      (goto-char input-start))
+     ;; Above input area: standard line-beginning behaviour.
+     (t
+      (move-beginning-of-line (or arg 1))))))
 
 (defun cavemacs-shell-complete ()
   "Trigger completion in the cavemacs input area.

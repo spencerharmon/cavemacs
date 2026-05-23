@@ -91,6 +91,23 @@
   :type 'boolean
   :group 'cavemacs)
 
+(defcustom cavemacs-render-thinking-default-collapsed t
+  "When non-nil, thinking blocks render collapsed by default.
+
+Collapsed blocks show only a summary line (`▶ thinking (N lines)')
+that the user can expand with TAB/RET/mouse-1."
+  :type 'boolean
+  :group 'cavemacs)
+
+(defcustom cavemacs-render-tool-default-collapsed nil
+  "When non-nil, tool-call body regions render collapsed by default.
+
+Collapsed bodies are replaced with a single summary line; the
+card header and footer remain visible.  Toggle with TAB/RET/
+mouse-1 on the card header."
+  :type 'boolean
+  :group 'cavemacs)
+
 ;; -----------------------------------------------------------------------------
 ;; Buffer-local render state
 ;; -----------------------------------------------------------------------------
@@ -113,6 +130,24 @@
 (defvar-local cavemacs-render--meta nil
   "Plist of last-known meta info: :model :provider :cost :tokens-in :tokens-out.")
 
+(defvar-local cavemacs-render--collapsed nil
+  "Hash table: block-id -> non-nil iff that block is collapsed.
+
+Block ids are arbitrary strings chosen by the renderer.  For
+thinking blocks the id is the assistant message key prefixed with
+\"thinking:\"; for tool cards it is \"tool:<tool-call-id>\".
+
+State lives buffer-local and is not persisted across restarts;
+each new session starts at the defaults from
+`cavemacs-render-thinking-default-collapsed' /
+`cavemacs-render-tool-default-collapsed'.")
+
+(defvar-local cavemacs-render--collapse-overlays nil
+  "Hash table: block-id -> overlay covering the collapsible body region.
+
+Used by `cavemacs-render-toggle-block' so the toggle keymap on the
+header can find its body without walking the buffer.")
+
 (defun cavemacs-render-init-buffer ()
   "Initialize buffer-local render state."
   (setq cavemacs-render--turn-overlays nil
@@ -120,7 +155,176 @@
         cavemacs-render--current-assistant-ov nil
         cavemacs-render--tool-overlays (make-hash-table :test 'equal)
         cavemacs-render--tool-start-times (make-hash-table :test 'equal)
-        cavemacs-render--meta nil))
+        cavemacs-render--meta nil
+        cavemacs-render--collapsed (make-hash-table :test 'equal)
+        cavemacs-render--collapse-overlays (make-hash-table :test 'equal)))
+
+;; -----------------------------------------------------------------------------
+;; Collapsibility (M11)
+;; -----------------------------------------------------------------------------
+;;
+;; Generic toggle: each collapsible block is keyed by an arbitrary
+;; string id.  Collapse state lives in `cavemacs-render--collapsed';
+;; the body-region overlay is tracked in
+;; `cavemacs-render--collapse-overlays' so the header's toggle handler
+;; can find it cheaply.
+;;
+;; Thinking blocks use ids of the form "thinking:<message-key>"; tool
+;; cards use "tool:<tool-call-id>".  Header overlays carry a
+;; `cavemacs-collapse-id' property the toggle reads.
+
+(defvar cavemacs-render-toggle-map
+  (let ((m (make-sparse-keymap)))
+    (define-key m (kbd "TAB")         #'cavemacs-render-toggle-at-point)
+    (define-key m (kbd "<tab>")       #'cavemacs-render-toggle-at-point)
+    (define-key m (kbd "RET")         #'cavemacs-render-toggle-at-point)
+    (define-key m (kbd "<return>")    #'cavemacs-render-toggle-at-point)
+    (define-key m (kbd "<mouse-1>")   #'cavemacs-render-toggle-at-mouse)
+    m)
+  "Keymap installed on collapsible block headers.")
+
+(defun cavemacs-render--block-id-at (pos)
+  "Return the cavemacs-collapse-id text-property at POS, if any."
+  (get-text-property pos 'cavemacs-collapse-id))
+
+(defun cavemacs-render--collapse-default (kind)
+  "Return the default collapsed state for KIND (\"thinking\" or \"tool\")."
+  (pcase kind
+    ("thinking" cavemacs-render-thinking-default-collapsed)
+    ("tool"     cavemacs-render-tool-default-collapsed)
+    (_          nil)))
+
+(defun cavemacs-render--collapsed-p (id)
+  "Return non-nil iff block ID is currently collapsed.
+
+If ID has no recorded state, fall back to the default for its
+kind (the prefix of ID up to the first colon)."
+  (cond
+   ((and cavemacs-render--collapsed
+         (let ((v (gethash id cavemacs-render--collapsed 'unset)))
+           (if (eq v 'unset) nil v)))
+    t)
+   ((and cavemacs-render--collapsed
+         (eq (gethash id cavemacs-render--collapsed 'unset) 'unset))
+    (cavemacs-render--collapse-default
+     (car (split-string id ":"))))
+   (t nil)))
+
+(defun cavemacs-render--set-collapsed (id value)
+  "Set collapse state for ID to VALUE (non-nil = collapsed)."
+  (unless cavemacs-render--collapsed
+    (setq cavemacs-render--collapsed (make-hash-table :test 'equal)))
+  (puthash id (and value t) cavemacs-render--collapsed))
+
+(defun cavemacs-render--apply-collapse (id)
+  "Apply the recorded collapse state of ID to its body overlay."
+  (when-let* ((ov (and cavemacs-render--collapse-overlays
+                       (gethash id cavemacs-render--collapse-overlays)))
+              ((overlay-buffer ov)))
+    (if (cavemacs-render--collapsed-p id)
+        (progn
+          (overlay-put ov 'invisible 'cavemacs-collapse)
+          (overlay-put ov 'before-string
+                       (overlay-get ov 'cavemacs-summary)))
+      (overlay-put ov 'invisible nil)
+      (overlay-put ov 'before-string nil))))
+
+(defun cavemacs-render-toggle-block (id)
+  "Toggle collapse state for block ID."
+  (interactive (list (cavemacs-render--block-id-at (point))))
+  (unless id
+    (user-error "No collapsible block at point"))
+  (cavemacs-render--set-collapsed
+   id (not (cavemacs-render--collapsed-p id)))
+  (cavemacs-render--apply-collapse id))
+
+(defun cavemacs-render-toggle-at-point ()
+  "Toggle the collapsible block whose header is at point."
+  (interactive)
+  (if-let* ((id (cavemacs-render--block-id-at (point))))
+      (cavemacs-render-toggle-block id)
+    ;; Fall through to the previous binding so RET still submits
+    ;; when called outside a header (e.g. in the input area).
+    (call-interactively (key-binding (this-single-command-keys)))))
+
+(defun cavemacs-render-toggle-at-mouse (event)
+  "Toggle the collapsible block clicked by EVENT."
+  (interactive "e")
+  (let* ((pos (posn-point (event-start event))))
+    (when-let* ((id (and pos (cavemacs-render--block-id-at pos))))
+      (cavemacs-render-toggle-block id))))
+
+(defun cavemacs-render--register-block (id header-beg header-end
+                                            body-beg body-end summary)
+  "Wire up a collapsible block.
+
+ID is the stable key.  Header line spans HEADER-BEG..HEADER-END;
+the body region spans BODY-BEG..BODY-END.  SUMMARY is a propertized
+string shown as `before-string' on the body overlay when collapsed
+(typically a one-liner like \"  ▶ collapsed (42 lines)\\n\").
+
+The header gets the `cavemacs-collapse-id' text property + the
+toggle keymap.  Idempotent: re-registering an ID replaces its
+previous body overlay (handy for thinking blocks, whose body is
+regenerated every delta)."
+  (let ((inhibit-read-only t))
+    ;; Tag the header line so navigation and the toggle handler can
+    ;; find this block from point.
+    (add-text-properties
+     header-beg header-end
+     `(cavemacs-collapse-id ,id
+       keymap ,cavemacs-render-toggle-map
+       mouse-face highlight
+       help-echo "TAB / RET / mouse-1: toggle"))
+    ;; Drop any prior body overlay for this id (thinking blocks
+    ;; regenerate on every delta).
+    (when-let* ((old (and cavemacs-render--collapse-overlays
+                          (gethash id cavemacs-render--collapse-overlays))))
+      (delete-overlay old))
+    (let ((ov (make-overlay body-beg body-end nil nil t)))
+      (overlay-put ov 'cavemacs-block-id id)
+      (overlay-put ov 'cavemacs-summary summary)
+      (overlay-put ov 'evaporate t)
+      (unless cavemacs-render--collapse-overlays
+        (setq cavemacs-render--collapse-overlays
+              (make-hash-table :test 'equal)))
+      (puthash id ov cavemacs-render--collapse-overlays)
+      (cavemacs-render--apply-collapse id))))
+
+;;;###autoload
+(defun cavemacs-render-collapse-all ()
+  "Collapse every collapsible block in this buffer."
+  (interactive)
+  (when cavemacs-render--collapse-overlays
+    (maphash (lambda (id _ov)
+               (cavemacs-render--set-collapsed id t)
+               (cavemacs-render--apply-collapse id))
+             cavemacs-render--collapse-overlays)))
+
+;;;###autoload
+(defun cavemacs-render-expand-all ()
+  "Expand every collapsible block in this buffer."
+  (interactive)
+  (when cavemacs-render--collapse-overlays
+    (maphash (lambda (id _ov)
+               (cavemacs-render--set-collapsed id nil)
+               (cavemacs-render--apply-collapse id))
+             cavemacs-render--collapse-overlays)))
+
+;;;###autoload
+(defun cavemacs-render-toggle-all ()
+  "Toggle every collapsible block in this buffer.
+If any are expanded, collapse all; otherwise expand all."
+  (interactive)
+  (let ((any-expanded nil))
+    (when cavemacs-render--collapse-overlays
+      (maphash (lambda (id _ov)
+                 (unless (cavemacs-render--collapsed-p id)
+                   (setq any-expanded t)))
+               cavemacs-render--collapse-overlays))
+    (if any-expanded
+        (cavemacs-render-collapse-all)
+      (cavemacs-render-expand-all))))
 
 ;; -----------------------------------------------------------------------------
 ;; Insertion helpers
@@ -422,6 +626,7 @@ M-x cavemacs-shell-restart to start a new process.\n"
       (let ((ov (make-overlay start (point) nil nil t)))
         (overlay-put ov 'cavemacs-role 'assistant)
         (overlay-put ov 'cavemacs-body-start body-start)
+        (overlay-put ov 'cavemacs-msg-key key)
         (overlay-put ov 'cavemacs-text "")
         (overlay-put ov 'cavemacs-thinking "")
         (puthash key ov cavemacs-render--message-overlays)
@@ -480,6 +685,7 @@ M-x cavemacs-shell-restart to start a new process.\n"
         (ov-end (overlay-end ov))
         (text (or (overlay-get ov 'cavemacs-text) ""))
         (thinking (or (overlay-get ov 'cavemacs-thinking) ""))
+        (msg-key (overlay-get ov 'cavemacs-msg-key))
         (is-error (overlay-get ov 'cavemacs-error))
         (buf (overlay-buffer ov))
         (face 'cavemacs-pretty-assistant-rule-face))
@@ -490,11 +696,45 @@ M-x cavemacs-shell-restart to start a new process.\n"
           (delete-region body-start ov-end)
           (when (and cavemacs-render-show-thinking
                      (not (string-empty-p thinking)))
-            (insert (propertize
-                     (cavemacs-render--indent-body
-                      (concat "▶ thinking\n" thinking) face)
-                     'face 'cavemacs-thinking-face))
-            (insert "\n\n"))
+            (let* ((nlines (length (split-string thinking "\n")))
+                   (rule-prefix (cavemacs-render--rule-prefix face))
+                   ;; Header line: rule + arrow + label.  We intentionally
+                   ;; include the indent prefix here so the body region
+                   ;; visually aligns.  The arrow stays as part of the
+                   ;; header text and flips via property when expanded.
+                   (header (concat
+                            rule-prefix
+                            (propertize "▶ thinking" 'face 'cavemacs-meta-face)
+                            (propertize (format " (%d line%s)"
+                                                nlines
+                                                (if (= nlines 1) "" "s"))
+                                        'face 'cavemacs-meta-face)
+                            "\n"))
+                   (header-beg (point))
+                   (_ (insert header))
+                   (header-end (point))
+                   (body-beg (point))
+                   (body-content
+                    (cavemacs-render--indent-body thinking face))
+                   (summary
+                    (propertize
+                     (concat rule-prefix
+                             (propertize
+                              (format "… %d hidden line%s\n"
+                                      nlines (if (= nlines 1) "" "s"))
+                              'face 'cavemacs-meta-face))
+                     'face 'cavemacs-thinking-face)))
+              (insert (propertize body-content
+                                  'face 'cavemacs-thinking-face))
+              (insert "\n")
+              (let ((body-end (point)))
+                ;; Hook this region into the collapse system if we have
+                ;; a stable message key (we always do in practice).
+                (when msg-key
+                  (cavemacs-render--register-block
+                   (format "thinking:%s" msg-key)
+                   header-beg header-end body-beg body-end summary)))
+              (insert "\n")))
           (let ((text-start (point)))
             (insert (cavemacs-render--indent-body text face))
             (unless (eq (char-before) ?\n) (insert "\n"))
@@ -687,11 +927,14 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                                  (cavemacs-pretty-glyph 'box-h)))
                  'face face))
         (insert "\n")
-        (let ((ov (make-overlay start (point) nil nil t)))
+        (let ((header-end (point))
+              (ov (make-overlay start (point) nil nil t)))
           (overlay-put ov 'cavemacs-tool-id tool-id)
           (overlay-put ov 'cavemacs-tool-name name)
           (overlay-put ov 'cavemacs-tool-status 'running)
           (overlay-put ov 'cavemacs-tool-face face)
+          (overlay-put ov 'cavemacs-header-beg start)
+          (overlay-put ov 'cavemacs-header-end header-end)
           (puthash tool-id ov cavemacs-render--tool-overlays))
         (cavemacs-render--apply-fringe start (1+ start) 'tool)))))
 
@@ -728,24 +971,52 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                        'face (if is-error 'cavemacs-error-face
                               'cavemacs-pretty-meta-face)))
               (insert "\n")
-              ;; Diff-mode fontify if the result smells like a unified diff.
-              (when (cavemacs-render--looks-like-diff-p text)
-                (cavemacs-render--fontify-diff body-beg (point)))
-              ;; Closing line:  ╰──── 0.42s ────
-              (let* ((duration-str
-                      (when duration (format " %.2fs " duration)))
-                     (close (concat
-                             (cavemacs-pretty-glyph 'box-bl)
-                             (make-string 4 (string-to-char
-                                             (cavemacs-pretty-glyph 'box-h)))
-                             (or duration-str "")
-                             (make-string 4 (string-to-char
-                                             (cavemacs-pretty-glyph 'box-h))))))
-                (insert (propertize close 'face rule-face))
-                (insert "\n"))
-              (move-overlay ov (overlay-start ov) (point))
-              (overlay-put ov 'cavemacs-tool-status
-                           (if is-error 'error 'ok)))))))))
+              (let ((body-end (point)))
+                ;; Diff-mode fontify if the result smells like a unified diff.
+                (when (cavemacs-render--looks-like-diff-p text)
+                  (cavemacs-render--fontify-diff body-beg body-end))
+                ;; Detect file paths inside the body and turn them into
+                ;; clickable buttons (eldoc/xref glue, M9 stretch).
+                (cavemacs-render--linkify-file-paths body-beg body-end)
+                ;; Closing line:  ╰──── 0.42s ────
+                (let* ((duration-str
+                        (when duration (format " %.2fs " duration)))
+                       (close (concat
+                               (cavemacs-pretty-glyph 'box-bl)
+                               (make-string 4 (string-to-char
+                                               (cavemacs-pretty-glyph 'box-h)))
+                               (or duration-str "")
+                               (make-string 4 (string-to-char
+                                               (cavemacs-pretty-glyph 'box-h))))))
+                  (insert (propertize close 'face rule-face))
+                  (insert "\n"))
+                ;; Register the body region (body-beg .. body-end) as
+                ;; the collapsible region.  Header is the line we wrote
+                ;; in --on-tool-start.
+                (when (and tool-id
+                           (overlay-get ov 'cavemacs-header-beg)
+                           (overlay-get ov 'cavemacs-header-end))
+                  (let* ((nlines (length (split-string
+                                          (buffer-substring-no-properties
+                                           body-beg body-end)
+                                          "\n" t)))
+                         (summary
+                          (propertize
+                           (concat body-prefix
+                                   (propertize
+                                    (format "… %d hidden line%s\n"
+                                            nlines
+                                            (if (= nlines 1) "" "s"))
+                                    'face 'cavemacs-pretty-meta-face))
+                           'face 'cavemacs-pretty-meta-face)))
+                    (cavemacs-render--register-block
+                     (format "tool:%s" tool-id)
+                     (overlay-get ov 'cavemacs-header-beg)
+                     (overlay-get ov 'cavemacs-header-end)
+                     body-beg body-end summary)))
+                (move-overlay ov (overlay-start ov) (point))
+                (overlay-put ov 'cavemacs-tool-status
+                             (if is-error 'error 'ok))))))))))
 
 (defun cavemacs-render--looks-like-diff-p (text)
   "Heuristic: does TEXT contain a unified diff header?"
@@ -763,6 +1034,139 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                nil)))
         (when font-lock-defaults
           (font-lock-default-fontify-region (point-min) (point-max) nil))))))
+
+;; -----------------------------------------------------------------------------
+;; File-path linkification (M9 stretch: eldoc/xref glue)
+;; -----------------------------------------------------------------------------
+
+(defcustom cavemacs-render-linkify-file-paths t
+  "When non-nil, recognize file paths in tool-call output and make them clickable.
+
+Recognized patterns:
+  - Unified-diff hunk headers (`+++ b/path' / `--- a/path')
+  - `path:line' and `path:line:col' (compilation-style)
+  - Bare relative paths that resolve to an existing file under the
+    project root.
+
+Clicking (or RET on) a recognized path opens the file via
+`find-file-other-window' at the indicated line, if any."
+  :type 'boolean
+  :group 'cavemacs)
+
+(defvar cavemacs-render--file-button-map
+  (let ((m (make-sparse-keymap)))
+    (define-key m (kbd "RET")       #'cavemacs-render-visit-file-at-point)
+    (define-key m (kbd "<return>")  #'cavemacs-render-visit-file-at-point)
+    (define-key m (kbd "<mouse-2>") #'cavemacs-render-visit-file-at-mouse)
+    (define-key m (kbd "<mouse-1>") #'cavemacs-render-visit-file-at-mouse)
+    m)
+  "Keymap installed on linkified file paths inside tool output.")
+
+(defun cavemacs-render--project-root-for-link ()
+  "Return the project root used as the base for resolving relative paths.
+
+Prefers `cavemacs-shell--project-root' (the buffer's session root)
+and falls back to `default-directory'."
+  (file-name-as-directory
+   (expand-file-name
+    (or (and (boundp 'cavemacs-shell--project-root)
+             cavemacs-shell--project-root)
+        default-directory))))
+
+(defun cavemacs-render--resolve-path (path)
+  "Return an absolute existing path for PATH, or nil.
+
+Strips leading `a/' or `b/' (the diff convention) before testing.
+Tries PATH as-is (absolute or relative to `default-directory'),
+then under the project root."
+  (let* ((p (replace-regexp-in-string "\\`[ab]/" "" path))
+         (candidates
+          (list p
+                (expand-file-name p)
+                (expand-file-name
+                 p (cavemacs-render--project-root-for-link)))))
+    (cl-loop for c in candidates
+             when (and c (file-exists-p c) (not (file-directory-p c)))
+             return (expand-file-name c))))
+
+(defun cavemacs-render--linkify-file-paths (beg end)
+  "Find file paths in BEG..END and overlay them as clickable links."
+  (when cavemacs-render-linkify-file-paths
+    (save-excursion
+      (save-restriction
+        (narrow-to-region beg end)
+        ;; Pattern 1: diff hunk file headers.
+        ;;   `--- a/foo.el'   `+++ b/foo.el'   `--- foo.el'
+        ;; Tool-card bodies are prefixed with a `│ ' rule, so we
+        ;; tolerate any non-LF prefix before the diff sigils.
+        (goto-char (point-min))
+        (while (re-search-forward
+                "^[^\n]*?\\(?:---\\|\\+\\+\\+\\)[ \t]+\\([^ \t\n]+\\)"
+                nil t)
+          (let* ((path-beg (match-beginning 1))
+                 (path-end (match-end 1))
+                 (raw (match-string 1)))
+            (when-let* ((abs (cavemacs-render--resolve-path raw)))
+              (cavemacs-render--make-file-button
+               path-beg path-end abs nil))))
+        ;; Pattern 2: `path:line[:col]' anywhere in the body.
+        (goto-char (point-min))
+        (while (re-search-forward
+                "\\([./[:alnum:]_+@~-]+\\.[A-Za-z0-9_+]+\\):\\([0-9]+\\)\\(?::[0-9]+\\)?\\>"
+                nil t)
+          (let* ((path-beg (match-beginning 1))
+                 (path-end (match-end 0))
+                 (raw (match-string 1))
+                 (line (string-to-number (match-string 2))))
+            (when-let* ((abs (cavemacs-render--resolve-path raw)))
+              (cavemacs-render--make-file-button
+               path-beg path-end abs line))))))))
+
+(defun cavemacs-render--make-file-button (beg end abs-path &optional line)
+  "Overlay BEG..END as a clickable button visiting ABS-PATH (at LINE)."
+  (let ((ov (make-overlay beg end)))
+    (overlay-put ov 'cavemacs-file-path abs-path)
+    (overlay-put ov 'cavemacs-file-line line)
+    (overlay-put ov 'keymap cavemacs-render--file-button-map)
+    (overlay-put ov 'mouse-face 'highlight)
+    (overlay-put ov 'help-echo
+                 (format "RET / mouse-1: visit %s%s"
+                         abs-path
+                         (if line (format ":%d" line) "")))
+    (overlay-put ov 'face 'link)
+    (overlay-put ov 'evaporate t)
+    ov))
+
+(defun cavemacs-render--file-button-at (pos)
+  "Return (ABS-PATH . LINE) for the file-link overlay at POS, or nil."
+  (cl-loop for ov in (overlays-at pos)
+           for path = (overlay-get ov 'cavemacs-file-path)
+           when path
+           return (cons path (overlay-get ov 'cavemacs-file-line))))
+
+(defun cavemacs-render-visit-file-at-point ()
+  "Visit the file linked at point in another window."
+  (interactive)
+  (if-let* ((cell (cavemacs-render--file-button-at (point))))
+      (cavemacs-render--visit (car cell) (cdr cell))
+    (user-error "No linked file at point")))
+
+(defun cavemacs-render-visit-file-at-mouse (event)
+  "Visit the file linked at the mouse EVENT position."
+  (interactive "e")
+  (let* ((pos (posn-point (event-start event))))
+    (if-let* ((cell (and pos (cavemacs-render--file-button-at pos))))
+        (cavemacs-render--visit (car cell) (cdr cell))
+      (user-error "No linked file at click position"))))
+
+(defun cavemacs-render--visit (abs-path &optional line)
+  "Open ABS-PATH in another window; if LINE is non-nil, jump to it."
+  (let ((buf (find-file-noselect abs-path)))
+    (pop-to-buffer buf)
+    (when (integerp line)
+      (goto-char (point-min))
+      (forward-line (1- line))
+      (back-to-indentation))))
 
 (defun cavemacs-render--render-tool-result (result)
   "Coerce RESULT (any JSON shape) into displayable text."

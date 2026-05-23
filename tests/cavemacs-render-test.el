@@ -160,8 +160,146 @@ fall back to showing it raw with the sigil."
                          (content . nil)
                          (stopReason . "error")
                          (errorMessage . "Connection refused")))))
-          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-            (should (string-match-p "⚠ Connection refused" text))))
+           (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+             (should (string-match-p "⚠ Connection refused" text))))
+       (kill-buffer buf))))
+
+;; -----------------------------------------------------------------------------
+;; M11: collapsibility
+;; -----------------------------------------------------------------------------
+
+(defun cavemacs-render-test--push-tool-pair (id name result)
+  "Push a tool start + end event pair into the current buffer."
+  (cavemacs-render-event
+   `((type . "tool_execution_start")
+     (toolCallId . ,id)
+     (toolName . ,name)
+     (args . ((x . 1)))))
+  (cavemacs-render-event
+   `((type . "tool_execution_end")
+     (toolCallId . ,id)
+     (toolName . ,name)
+     (isError . :json-false)
+     (result . ((output . ,result))))))
+
+(ert-deftest cavemacs-render/collapse-block-stores-state ()
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-test--push-tool-pair "tc-collapse" "bash" "line1\nline2\nline3")
+          (cavemacs-render--set-collapsed "tool:tc-collapse" t)
+          (should (cavemacs-render--collapsed-p "tool:tc-collapse"))
+          (cavemacs-render--set-collapsed "tool:tc-collapse" nil)
+          (should-not (cavemacs-render--collapsed-p "tool:tc-collapse")))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-render/tool-block-registers-collapse-overlay ()
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-test--push-tool-pair "tc-ov" "bash" "a\nb")
+          (should (gethash "tool:tc-ov" cavemacs-render--collapse-overlays))
+          ;; Header line should carry the collapse id text property.
+          (let ((found nil))
+            (save-excursion
+              (goto-char (point-min))
+              (while (let ((next (next-single-property-change
+                                  (point) 'cavemacs-collapse-id)))
+                       (and next (progn (goto-char next) t)))
+                (when (equal (get-text-property (point) 'cavemacs-collapse-id)
+                             "tool:tc-ov")
+                  (setq found t))))
+            (should found)))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-render/toggle-all-flips-everything ()
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-test--push-tool-pair "tc-a" "bash" "x")
+          (cavemacs-render-test--push-tool-pair "tc-b" "bash" "y")
+          (cavemacs-render--set-collapsed "tool:tc-a" nil)
+          (cavemacs-render--set-collapsed "tool:tc-b" nil)
+          (cavemacs-render-toggle-all)
+          (should (cavemacs-render--collapsed-p "tool:tc-a"))
+          (should (cavemacs-render--collapsed-p "tool:tc-b"))
+          (cavemacs-render-toggle-all)
+          (should-not (cavemacs-render--collapsed-p "tool:tc-a"))
+          (should-not (cavemacs-render--collapsed-p "tool:tc-b")))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-render/expand-all-then-collapse-all ()
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-test--push-tool-pair "tc-c" "bash" "z")
+          (cavemacs-render-expand-all)
+          (should-not (cavemacs-render--collapsed-p "tool:tc-c"))
+          (cavemacs-render-collapse-all)
+          (should (cavemacs-render--collapsed-p "tool:tc-c")))
+      (kill-buffer buf))))
+
+;; -----------------------------------------------------------------------------
+;; File-path linkification (M9 stretch)
+;; -----------------------------------------------------------------------------
+
+(ert-deftest cavemacs-render/linkify-diff-header ()
+  "+++ b/<existing-file> in a tool result gets a clickable button."
+  (let* ((tmp (make-temp-file "cavemacs-link-" nil ".el"))
+         (buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (let ((default-directory (file-name-directory tmp))
+                (cavemacs-shell--project-root (file-name-directory tmp)))
+            (cavemacs-render-test--push-tool-pair
+             "tc-link"
+             "edit"
+             (format "--- a/%s\n+++ b/%s\n@@\n-x\n+y"
+                     (file-name-nondirectory tmp)
+                     (file-name-nondirectory tmp))))
+          ;; Walk overlays looking for a cavemacs-file-path equal to tmp.
+          (let (found)
+            (dolist (ov (overlays-in (point-min) (point-max)))
+              (when (equal (overlay-get ov 'cavemacs-file-path)
+                           (expand-file-name tmp))
+                (setq found t)))
+            (should found)))
+      (kill-buffer buf)
+      (delete-file tmp))))
+
+(ert-deftest cavemacs-render/linkify-path-colon-line ()
+  "path:42 in tool output becomes a button with :line 42."
+  (let* ((tmp (make-temp-file "cavemacs-link2-" nil ".el"))
+         (buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (let ((default-directory (file-name-directory tmp))
+                (cavemacs-shell--project-root (file-name-directory tmp)))
+            (cavemacs-render-test--push-tool-pair
+             "tc-link2" "grep"
+             (format "%s:42:5: match here" (file-name-nondirectory tmp))))
+          (let (found-line)
+            (dolist (ov (overlays-in (point-min) (point-max)))
+              (when (and (equal (overlay-get ov 'cavemacs-file-path)
+                                (expand-file-name tmp))
+                         (equal (overlay-get ov 'cavemacs-file-line) 42))
+                (setq found-line t)))
+            (should found-line)))
+      (kill-buffer buf)
+      (delete-file tmp))))
+
+(ert-deftest cavemacs-render/linkify-ignores-nonexistent-paths ()
+  "Paths that don't resolve to a real file are not linkified."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-test--push-tool-pair
+           "tc-nope" "bash" "/this/path/should/never/exist.xyz:1:1")
+          (let (found)
+            (dolist (ov (overlays-in (point-min) (point-max)))
+              (when (overlay-get ov 'cavemacs-file-path)
+                (setq found t)))
+            (should-not found)))
       (kill-buffer buf))))
 
 (provide 'cavemacs-render-test)
