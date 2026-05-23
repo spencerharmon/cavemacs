@@ -8,9 +8,20 @@
 ;;
 ;;; Code:
 
-(require 'transient)
 (require 'cavemacs-shell)
 (require 'cavemacs-commands)
+
+;; Transient is loaded lazily inside `cavemacs-cavekit' so that we
+;; never expand `transient-define-prefix' against a stale (built-in)
+;; transient at load time.  This sidesteps the failure mode where
+;; Emacs 30's built-in transient (0.7.x) was loaded before
+;; straight.el's newer transient (0.13+); the macro expansion in the
+;; older transient does not emit calls to `transient--set-layout',
+;; while the newer macro does -- mixing them produces a `void-function'
+;; at runtime.
+
+(defvar cavemacs-cavekit--defined nil)
+(declare-function cavemacs-cavekit--prefix "cavemacs-cavekit" ())
 
 (defun cavemacs-cavekit--send (slash)
   "Send a cavekit slash command SLASH and submit."
@@ -38,14 +49,28 @@
          (path (expand-file-name "SPEC.md" root)))
     (find-file path)))
 
-(transient-define-prefix cavemacs-cavekit ()
-  "Cavekit (spec-driven workflow) commands."
-  ["Workflow"
-   ("s" "/ck:spec  — create/amend/backprop SPEC.md"  cavemacs-cavekit-spec)
-   ("b" "/ck:build — execute next task against spec" cavemacs-cavekit-build)
-   ("c" "/ck:check — drift report"                   cavemacs-cavekit-check)]
-  ["Files"
-   ("o" "Open SPEC.md"                               cavemacs-cavekit-open-spec)])
+(defun cavemacs-cavekit--ensure-defined ()
+  "Define the cavekit transient prefix on first use."
+  (unless cavemacs-cavekit--defined
+    (require 'transient)
+    (eval
+     '(transient-define-prefix cavemacs-cavekit--prefix ()
+        "Cavekit (spec-driven workflow) commands."
+        ["Workflow"
+         ("s" "/ck:spec  — create/amend/backprop SPEC.md"  cavemacs-cavekit-spec)
+         ("b" "/ck:build — execute next task against spec" cavemacs-cavekit-build)
+         ("c" "/ck:check — drift report"                   cavemacs-cavekit-check)]
+        ["Files"
+         ("o" "Open SPEC.md"                               cavemacs-cavekit-open-spec)])
+     t)
+    (setq cavemacs-cavekit--defined t)))
+
+;;;###autoload
+(defun cavemacs-cavekit ()
+  "Open the cavekit transient menu."
+  (interactive)
+  (cavemacs-cavekit--ensure-defined)
+  (call-interactively #'cavemacs-cavekit--prefix))
 
 (provide 'cavemacs-cavekit)
 ;;; cavemacs-cavekit.el ends here

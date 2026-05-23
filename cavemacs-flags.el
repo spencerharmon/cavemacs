@@ -7,11 +7,16 @@
 ;;
 ;;; Code:
 
-(require 'transient)
 (require 'cavemacs-shell)
 (require 'cavemacs-rpc)
 (require 'cavemacs-tools)
 (require 'cavemacs-commands)
+
+;; See cavemacs-cavekit.el for the rationale behind lazy transient
+;; definition; same load-order defense applies here.
+
+(defvar cavemacs-flags--defined nil)
+(declare-function cavemacs-flags--prefix "cavemacs-flags" ())
 
 (defun cavemacs-flags--require-conn ()
   (unless (and (boundp 'cavemacs-shell--conn)
@@ -109,18 +114,32 @@
   (cavemacs-rpc-send cavemacs-shell--conn "compact")
   (message "cavemacs: compacting…"))
 
-(transient-define-prefix cavemacs-flags ()
-  "Per-session model, thinking, and behaviour flags."
-  ["Model"
-   ("m" "Pick model"          cavemacs-flags-pick-model)
-   ("M" "Cycle model"         cavemacs-flags-cycle-model)]
-  ["Thinking"
-   ("t" "Set level"           cavemacs-flags-set-thinking)
-   ("T" "Cycle level"         cavemacs-flags-cycle-thinking)]
-  ["Behaviour"
-   ("a" "Toggle autopilot"    cavemacs-flags-toggle-autopilot)
-   ("c" "Toggle auto-compact" cavemacs-flags-toggle-auto-compaction)
-   ("C" "Compact now"         cavemacs-flags-compact)])
+(defun cavemacs-flags--ensure-defined ()
+  "Define the flags transient prefix on first use."
+  (unless cavemacs-flags--defined
+    (require 'transient)
+    (eval
+     '(transient-define-prefix cavemacs-flags--prefix ()
+        "Per-session model, thinking, and behaviour flags."
+        ["Model"
+         ("m" "Pick model"          cavemacs-flags-pick-model)
+         ("M" "Cycle model"         cavemacs-flags-cycle-model)]
+        ["Thinking"
+         ("t" "Set level"           cavemacs-flags-set-thinking)
+         ("T" "Cycle level"         cavemacs-flags-cycle-thinking)]
+        ["Behaviour"
+         ("a" "Toggle autopilot"    cavemacs-flags-toggle-autopilot)
+         ("c" "Toggle auto-compact" cavemacs-flags-toggle-auto-compaction)
+         ("C" "Compact now"         cavemacs-flags-compact)])
+     t)
+    (setq cavemacs-flags--defined t)))
+
+;;;###autoload
+(defun cavemacs-flags ()
+  "Open the cavemacs flags transient menu."
+  (interactive)
+  (cavemacs-flags--ensure-defined)
+  (call-interactively #'cavemacs-flags--prefix))
 
 ;; Bind into the shell map at load time.
 (with-eval-after-load 'cavemacs-shell
