@@ -41,6 +41,8 @@
 (require 'diff-mode)
 (require 'cavemacs-pretty)
 
+(declare-function markdown-mode "markdown-mode" ())
+
 ;; -----------------------------------------------------------------------------
 ;; Back-compat faces (renderer still references these directly in places;
 ;; cavemacs-pretty.el supplies the modern equivalents).
@@ -800,7 +802,13 @@ messages render with no header at all."
                    header-beg header-end body-beg body-end nil)))))
           (let ((text-start (point)))
             (unless (string-empty-p text)
-              (insert (cavemacs-render--indent-body text face))
+              (let ((rendered
+                     (if (and (not is-error)
+                              cavemacs-render-fontify-markdown
+                              (featurep 'markdown-mode))
+                         (cavemacs-render--fontify-markdown-string text)
+                       text)))
+                (insert (cavemacs-render--indent-body rendered face)))
               (unless (eq (char-before) ?\n) (insert "\n"))
               (insert "\n"))
             (cond
@@ -809,24 +817,27 @@ messages render with no header at all."
                                  'cavemacs-error-face))
              ((and cavemacs-render-fontify-markdown
                        (featurep 'markdown-mode))
-              (cavemacs-render--fontify-markdown text-start (point))
               (cavemacs-render--decorate-code-blocks text-start (point))
               (cavemacs-render--apply-variable-pitch text-start (point))))
             (move-overlay ov (overlay-start ov) (point))))))))
 
+(defun cavemacs-render--fontify-markdown-string (text)
+  "Return TEXT with markdown-mode font-lock faces applied as text properties."
+  (condition-case _
+      (with-temp-buffer
+        (insert text)
+        (delay-mode-hooks (markdown-mode))
+        (font-lock-ensure (point-min) (point-max))
+        (buffer-string))
+    (error text)))
+
 (defun cavemacs-render--fontify-markdown (beg end)
-  "Apply markdown font-lock keywords to the region BEG..END."
-  (save-restriction
-    (narrow-to-region beg end)
-    (let* ((kw (cond
-                ((boundp 'markdown-mode-font-lock-keywords)
-                 (symbol-value 'markdown-mode-font-lock-keywords))
-                ((boundp 'markdown-mode-font-lock-keywords-basic)
-                 (symbol-value 'markdown-mode-font-lock-keywords-basic))))
-           (font-lock-defaults (and kw `(,kw nil nil nil nil))))
-      (when font-lock-defaults
-        (ignore-errors
-          (font-lock-default-fontify-region (point-min) (point-max) nil))))))
+  "Apply markdown font-lock to the region BEG..END (in-place)."
+  (let ((text (buffer-substring-no-properties beg end)))
+    (save-excursion
+      (goto-char beg)
+      (delete-region beg end)
+      (insert (cavemacs-render--fontify-markdown-string text)))))
 
 (defun cavemacs-render--apply-variable-pitch (beg end)
   "If pretty + variable-pitch enabled, mark assistant prose accordingly.
