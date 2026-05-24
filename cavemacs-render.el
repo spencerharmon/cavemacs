@@ -937,8 +937,8 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
           (overlay-put ov 'cavemacs-tool-name name)
           (overlay-put ov 'cavemacs-tool-status 'running)
           (overlay-put ov 'cavemacs-tool-face face)
-          (overlay-put ov 'cavemacs-header-beg start)
-          (overlay-put ov 'cavemacs-header-end header-end)
+          (overlay-put ov 'cavemacs-header-beg (copy-marker start nil))
+          (overlay-put ov 'cavemacs-header-end (copy-marker header-end t))
           (puthash tool-id ov cavemacs-render--tool-overlays))
         (cavemacs-render--apply-fringe start (1+ start) 'tool)))))
 
@@ -1015,8 +1015,8 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                            'face 'cavemacs-pretty-meta-face)))
                     (cavemacs-render--register-block
                      (format "tool:%s" tool-id)
-                     (overlay-get ov 'cavemacs-header-beg)
-                     (overlay-get ov 'cavemacs-header-end)
+                     (marker-position (overlay-get ov 'cavemacs-header-beg))
+                     (marker-position (overlay-get ov 'cavemacs-header-end))
                      body-beg body-end summary)))
                 (move-overlay ov (overlay-start ov) (point))
                 (overlay-put ov 'cavemacs-tool-status
