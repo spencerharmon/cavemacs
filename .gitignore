@@ -2,4 +2,3 @@ node_modules/
 package-lock.json
 *.elc
 /.agent-shell/
-.cavemacs-version

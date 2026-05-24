@@ -659,6 +659,15 @@ flagged inline above.
 - No Windows-specific work in v1 (matches caveman's own daemon
   roadmap).
 
+* Known issues
+
+- Resuming an existing session (session browser / -continue) does not
+  restore the model in the header line. The pretty header keeps the
+  default/last value until the next assistant message republishes
+  meta. Likely fix: on session resume, call =get_state= (or similar)
+  and push =:provider= / =:model= into =cavemacs-pretty--header-state=
+  before the first turn.
+
 * Timeline (rough, solo developer, part-time)
 
 | Milestone | Effort |
