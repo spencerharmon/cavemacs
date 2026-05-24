@@ -295,7 +295,23 @@ Layout (top to bottom):
     ;; Fire an initial state query; result populates modeline.
     (cavemacs-rpc-request
      conn "get_state"
-     (cavemacs-shell--make-state-callback (current-buffer)))))
+     (cavemacs-shell--make-state-callback (current-buffer)))
+    (when session-file
+      (cavemacs-rpc-request
+       conn "get_messages"
+       (cavemacs-shell--make-replay-callback (current-buffer))))))
+
+(defun cavemacs-shell--make-replay-callback (buffer)
+  "Return a callback that replays prior session messages into BUFFER."
+  (lambda (resp)
+    (when (and (buffer-live-p buffer)
+               (eq (alist-get 'success resp) t))
+      (with-current-buffer buffer
+        (let* ((data (alist-get 'data resp))
+               (messages (alist-get 'messages data)))
+          (when (and messages (listp messages) (> (length messages) 0))
+            (cavemacs-render-replay-messages
+             (append messages nil))))))))
 
 (defun cavemacs-shell--make-event-router (buffer)
   "Return a closure that routes events to the renderer in BUFFER."

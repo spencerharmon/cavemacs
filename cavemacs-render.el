@@ -466,6 +466,45 @@ boundaries quickly."
       (alist-get 'role message)))
 
 ;; -----------------------------------------------------------------------------
+;; History replay (session resume)
+;; -----------------------------------------------------------------------------
+
+(defun cavemacs-render-replay-messages (messages)
+  "Render prior session MESSAGES (a list of AgentMessage alists) into the
+buffer by synthesizing the AgentSessionEvents the live agent would have
+emitted. Tool calls in assistant messages are paired with subsequent
+toolResult messages by `toolCallId'."
+  (dolist (msg messages)
+    (let ((role (alist-get 'role msg)))
+      (pcase role
+        ("user"
+         (cavemacs-render-event `((type . "message_start") (message . ,msg)))
+         (cavemacs-render-event `((type . "message_end")   (message . ,msg))))
+        ("assistant"
+         (cavemacs-render-event `((type . "message_start") (message . ,msg)))
+         (let ((content (alist-get 'content msg)))
+           (when (listp content)
+             (dolist (part content)
+               (when (and (listp part)
+                          (equal (alist-get 'type part) "toolCall"))
+                 (cavemacs-render-event
+                  `((type . "tool_execution_start")
+                    (toolCallId . ,(alist-get 'id part))
+                    (toolName   . ,(alist-get 'name part))
+                    (args       . ,(alist-get 'arguments part))))))))
+         (cavemacs-render-event `((type . "message_end") (message . ,msg))))
+        ((or "toolResult" "tool_result" "tool")
+         (cavemacs-render-event
+          `((type . "tool_execution_end")
+            (toolCallId . ,(alist-get 'toolCallId msg))
+            (toolName   . ,(alist-get 'toolName msg))
+            (result     . ((content . ,(alist-get 'content msg))
+                           (details . ,(alist-get 'details msg))))
+            (isError    . ,(alist-get 'isError msg)))))
+        (_ nil))))
+  (cavemacs-pretty-state-put :status 'idle))
+
+;; -----------------------------------------------------------------------------
 ;; Per-event handlers
 ;; -----------------------------------------------------------------------------
 

@@ -21,8 +21,8 @@
       ;; inserts above it.
       (goto-char (point-max))
       (insert "\n--- input ---\n")
-      (setq cavemacs-shell--prompt-marker (copy-marker (point) nil))
-      (set-marker-insertion-type cavemacs-shell--prompt-marker nil))
+      (setq cavemacs-shell--prompt-marker (copy-marker (point) t))
+      (set-marker-insertion-type cavemacs-shell--prompt-marker t))
     buf))
 
 (defconst cavemacs-render-test--ping-sequence
@@ -63,6 +63,33 @@
     ((type . "agent_end")
      (messages . nil)))
   "Synthetic event sequence equivalent to a real one-word reply.")
+
+(ert-deftest cavemacs-render/replay-renders-history ()
+  "`cavemacs-render-replay-messages' renders user/assistant/tool history."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-replay-messages
+           '(((role . "user")
+              (content . (((type . "text") (text . "old question")))))
+             ((role . "assistant")
+              (provider . "anthropic")
+              (model . "claude")
+              (content . (((type . "text") (text . "sure, running ls"))
+                          ((type . "toolCall") (id . "tc-replay")
+                           (name . "bash")
+                           (arguments . ((command . "ls")))))))
+             ((role . "toolResult")
+              (toolCallId . "tc-replay")
+              (toolName . "bash")
+              (isError . :json-false)
+              (content . (((type . "text") (text . "replayed-file")))))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "old question" text))
+            (should (string-match-p "sure, running ls" text))
+            (should (string-match-p "⚙ bash" text))
+            (should (string-match-p "replayed-file" text))))
+      (kill-buffer buf))))
 
 (ert-deftest cavemacs-render/streams-assistant-text ()
   (let ((buf (cavemacs-render-test--fresh-buffer)))
