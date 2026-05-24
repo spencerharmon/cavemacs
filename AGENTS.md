@@ -20,22 +20,45 @@ workflows and pitfalls that have bitten us during development.
 
 ## Version bump on every reload-required push (MANDATORY)
 
-Bump `cavemacs-version` (PATCH) in `cavemacs.el` on every push that
-requires the user to reload Emacs to test. The version is shown in
-the pretty header-line as `cavemacs X.Y.Z` so the user can visually
-confirm the new code is loaded.
+Every release (= every push the user must reload Emacs to test) MUST
+bump `cavemacs-version` (PATCH) in `cavemacs.el`. The version is
+shown in the pretty header-line as `cavemacs X.Y.Z`; the user uses
+it to visually confirm the new code is loaded. Without a bump the
+user cannot tell stale-vs-fresh and we re-enter the
+"rebuilt-but-still-broken" failure mode this whole doc exists to
+prevent.
 
-Workflow:
+Current baseline: see `(defconst cavemacs-version ...)` in
+`cavemacs.el`. Pre-1.0; bump PATCH only.
+
+### The full release / test loop
+
+For every code change the user needs to reload to test, do ALL of:
+
 1. Make the change.
-2. Bump PATCH in the `(defconst cavemacs-version "X.Y.Z" ...)` form
-   in `cavemacs.el`.
-3. Commit + push.
-4. `cd ~/.emacs.d/straight/repos/cavemacs && git pull --ff-only`.
-5. Tell the user to restart and confirm the new version in the
-   header-line.
+2. Run unit + render tests (`emacs --batch ...`, see Testing
+   section). They must pass.
+3. Byte-compile clean (no warnings).
+4. Bump PATCH in the `(defconst cavemacs-version "X.Y.Z" ...)` form
+   in `cavemacs.el`. Also update the `;; Version:` header comment
+   at the top of `cavemacs.el` to match.
+5. `git add` + `git commit` (conventional-commit style; explain WHY
+   and any non-obvious mechanics).
+6. `git push` to `origin/main`.
+7. Refresh the user's straight clone so they're not running stale
+   code:
+   ```bash
+   cd ~/.emacs.d/straight/repos/cavemacs && git pull --ff-only
+   ```
+8. Verify parity: the SHA from `git log --oneline -1` in the user's
+   straight clone must match `origin/main`.
+9. Tell the user: "Restart Emacs. Header-line should read
+   `cavemacs X.Y.Z` (the new PATCH)." If they report the old PATCH,
+   they're still on stale code.
 
-Doc-only or test-only changes that don't affect runtime don't need
-a bump.
+Doc-only changes (README, AGENTS.md, plan.org) and test-only
+changes that don't affect runtime do NOT need a version bump or a
+straight-clone refresh. Everything else does.
 
 ## Refresh-before-test workflow (MANDATORY)
 
