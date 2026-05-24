@@ -79,5 +79,89 @@ unexpected and confusing)."
                               cavemacs-shell--input-start-marker))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-shell/c-c-c-idle-abandons-line ()
+  "C-c C-c when idle: leaves typed text in buffer, drops a fresh
+prompt below, moves point to new input-start, sends nothing."
+  (let ((buf (cavemacs-shell-test--fresh-buffer))
+        (sent nil))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-pretty-state-put :status 'idle)
+          (goto-char (point-max))
+          (insert "half-written prompt")
+          (let ((old-input-start (marker-position
+                                  cavemacs-shell--input-start-marker)))
+            (cl-letf (((symbol-function 'cavemacs-rpc-send)
+                       (lambda (&rest args) (push args sent)))
+                      ((symbol-function 'cavemacs-rpc-live-p)
+                       (lambda (&rest _) t)))
+              (cavemacs-shell-abort))
+            (should (string-match-p
+                     "half-written prompt"
+                     (buffer-substring-no-properties (point-min) (point-max))))
+            (should-not sent)
+            (should (= (point) (point-max)))
+            (should (= (point)
+                       (marker-position cavemacs-shell--input-start-marker)))
+            (should (> (marker-position cavemacs-shell--input-start-marker)
+                       old-input-start))))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-shell/c-c-c-busy-aborts-on-confirm ()
+  "C-c C-c when busy + user confirms: sends abort RPC."
+  (let ((buf (cavemacs-shell-test--fresh-buffer))
+        (sent nil)
+        (native-comp-deferred-compilation nil)
+        (inhibit-automatic-native-compilation t))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-pretty-state-put :status 'busy)
+          (cl-letf (((symbol-function 'cavemacs-rpc-send)
+                     (lambda (_conn verb &rest _) (push verb sent)))
+                    ((symbol-function 'cavemacs-rpc-live-p)
+                     (lambda (&rest _) t))
+                    ((symbol-function 'cavemacs-shell--confirm-abort)
+                     (lambda (&rest _) t)))
+            (cavemacs-shell-abort))
+          (should (member "abort" sent)))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-shell/c-c-c-busy-declined-noop ()
+  "C-c C-c when busy + user declines: no RPC, input untouched."
+  (let ((buf (cavemacs-shell-test--fresh-buffer))
+        (sent nil)
+        (native-comp-deferred-compilation nil)
+        (inhibit-automatic-native-compilation t))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-pretty-state-put :status 'busy)
+          (goto-char (point-max))
+          (insert "keep me")
+          (let ((before (buffer-string)))
+            (cl-letf (((symbol-function 'cavemacs-rpc-send)
+                       (lambda (&rest args) (push args sent)))
+                      ((symbol-function 'cavemacs-rpc-live-p)
+                       (lambda (&rest _) t))
+                      ((symbol-function 'cavemacs-shell--confirm-abort)
+                       (lambda (&rest _) nil)))
+              (cavemacs-shell-abort))
+            (should-not sent)
+            (should (equal before (buffer-string)))))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-shell/busy-clears-on-turn-end ()
+  "After turn_end, header status must flip back to idle.
+Regression: previously only agent_end cleared it."
+  (require 'cavemacs-render)
+  (let ((buf (cavemacs-shell-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-pretty-state-put :status 'idle)
+          (cavemacs-render-event '((type . "turn_start")))
+          (should (eq (cavemacs-pretty-state-get :status) 'busy))
+          (cavemacs-render-event '((type . "turn_end")))
+          (should (eq (cavemacs-pretty-state-get :status) 'idle)))
+      (kill-buffer buf))))
+
 (provide 'cavemacs-shell-test)
 ;;; cavemacs-shell-test.el ends here

@@ -309,6 +309,7 @@ Layout (top to bottom):
             ("tool_execution_start"
              (cavemacs-shell--set-mode-info
               (format "tool: %s" (alist-get 'toolName event))))
+            ("turn_end"  (cavemacs-shell--set-mode-info "idle"))
             ("agent_end"  (cavemacs-shell--set-mode-info "idle"))
             ("compaction_start" (cavemacs-shell--set-mode-info "compacting…"))
             ("cavemacs_process_exited"
@@ -521,12 +522,41 @@ itself."
     ;; typing and so `(eobp)' will be true on the next RET.
     (goto-char (point-max))))
 
+(defun cavemacs-shell--busy-p ()
+  "Return non-nil when the agent has an in-flight turn."
+  (eq (cavemacs-pretty-state-get :status) 'busy))
+
+(defun cavemacs-shell--confirm-abort ()
+  "Ask the user whether to abort the in-flight turn.
+Indirected so tests can stub it without redefining `yes-or-no-p'
+(which triggers native-comp trampoline generation in batch)."
+  (yes-or-no-p "cavemacs: abort in-flight turn? "))
+
 (defun cavemacs-shell-abort ()
-  "Abort the current run, if any."
+  "Context-sensitive C-c C-c.
+
+If the agent is busy, prompt to abort the in-flight turn.  If the
+agent is idle, abandon the current input line (leaving its text
+in the buffer as scrollback) and drop a fresh prompt at
+`point-max', moving point (and every live window-point displaying
+the buffer) to the new input area.  Abandoned text is NOT sent
+to the agent."
   (interactive)
-  (when (cavemacs-rpc-live-p cavemacs-shell--conn)
-    (cavemacs-rpc-send cavemacs-shell--conn "abort")
-    (cavemacs-shell--set-mode-info "aborting…")))
+  (cond
+   ((cavemacs-shell--busy-p)
+    (when (cavemacs-rpc-live-p cavemacs-shell--conn)
+      (when (cavemacs-shell--confirm-abort)
+        (cavemacs-rpc-send cavemacs-shell--conn "abort")
+        (cavemacs-shell--set-mode-info "aborting…"))))
+   (t
+    (let ((inhibit-read-only t)
+          (buf (current-buffer)))
+      (goto-char (point-max))
+      (unless (eq (char-before) ?\n) (insert "\n"))
+      (cavemacs-shell--install-prompt)
+      (goto-char (point-max))
+      (dolist (w (get-buffer-window-list buf nil t))
+        (set-window-point w (point-max)))))))
 
 (defun cavemacs-shell-new-session-in-buffer ()
   "Reset this buffer's session (caveman `new_session').

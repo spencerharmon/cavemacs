@@ -613,33 +613,58 @@ M-x cavemacs-shell-restart to start a new process.\n"
       (cavemacs-render--apply-fringe start (1+ start) 'turn-user))))
 
 (defun cavemacs-render--render-asst-start (msg start key)
-  "Render the opening bubble for an assistant message."
+  "Open an assistant message overlay WITHOUT yet emitting a header line.
+
+Header is deferred and emitted by `cavemacs-render--maybe-emit-header'
+on the first prose / thinking insertion.  Tool-only assistant
+messages render with no header at all."
   (let* ((face 'cavemacs-pretty-assistant-rule-face)
          (glyph (cavemacs-pretty-glyph 'assistant))
          (model (alist-get 'model msg))
          (provider (alist-get 'provider msg))
-         ;; "Assistant" literal kept for test back-compat.
          (title (cond ((and model provider)
-                       (format "Assistant · %s/%s" provider model))
-                      (model    (format "Assistant · %s" model))
-                      (t        "Assistant")))
-         (meta (cavemacs-pretty-now)))
-    (insert (cavemacs-render--header-line 'assistant glyph face title meta))
+                       (format "Caveman \u00b7 %s/%s" provider model))
+                      (model    (format "Caveman \u00b7 %s" model))
+                      (t        "Caveman")))
+         (meta (cavemacs-pretty-now))
+         (header (cavemacs-render--header-line
+                  'assistant glyph face title meta)))
     (when (and provider (not (string-empty-p provider)))
       (cavemacs-pretty-state-put :provider provider))
     (when (and model (not (string-empty-p model)))
       (cavemacs-pretty-state-put :model model))
     (let ((body-start (point)))
-      (insert "")
       (let ((ov (make-overlay start (point) nil nil nil)))
         (overlay-put ov 'cavemacs-role 'assistant)
         (overlay-put ov 'cavemacs-body-start body-start)
         (overlay-put ov 'cavemacs-msg-key key)
         (overlay-put ov 'cavemacs-text "")
         (overlay-put ov 'cavemacs-thinking "")
+        (overlay-put ov 'cavemacs-header-text header)
         (puthash key ov cavemacs-render--message-overlays)
-        (setq cavemacs-render--current-assistant-ov ov))
-      (cavemacs-render--apply-fringe start (1+ start) 'turn-asst))))
+        (setq cavemacs-render--current-assistant-ov ov)))))
+
+(defun cavemacs-render--maybe-emit-header (ov)
+  "If OV has a deferred header and any prose/thinking is present, emit it."
+  (let ((header (overlay-get ov 'cavemacs-header-text))
+        (text (or (overlay-get ov 'cavemacs-text) ""))
+        (thinking (or (overlay-get ov 'cavemacs-thinking) "")))
+    (when (and header
+               (or (not (string-empty-p text))
+                   (and cavemacs-render-show-thinking
+                        (not (string-empty-p thinking)))))
+      (let* ((body-start (overlay-get ov 'cavemacs-body-start))
+             (inhibit-read-only t))
+        (save-excursion
+          (goto-char body-start)
+          (let ((hbeg (point)))
+            (insert header)
+            (let ((new-body-start (point)))
+              (overlay-put ov 'cavemacs-body-start new-body-start)
+              (move-overlay ov (overlay-start ov)
+                            (max (overlay-end ov) new-body-start))
+              (overlay-put ov 'cavemacs-header-text nil)
+              (cavemacs-render--apply-fringe hbeg (1+ hbeg) 'turn-asst))))))))
 
 ;; -----------------------------------------------------------------------------
 ;; message_update (streaming deltas)
@@ -699,6 +724,10 @@ M-x cavemacs-shell-restart to start a new process.\n"
         (face 'cavemacs-pretty-assistant-rule-face))
     (when (and (buffer-live-p buf) body-start ov-end)
       (with-current-buffer buf
+        ;; Emit deferred header on first prose/thinking content.
+        (cavemacs-render--maybe-emit-header ov)
+        (setq body-start (overlay-get ov 'cavemacs-body-start)
+              ov-end (overlay-end ov))
         (save-excursion
           (goto-char body-start)
           (delete-region body-start ov-end)
@@ -934,6 +963,7 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
               (ov (make-overlay start (point) nil nil t)))
           (overlay-put ov 'cavemacs-tool-id tool-id)
           (overlay-put ov 'cavemacs-tool-name name)
+          (overlay-put ov 'cavemacs-tool-args args)
           (overlay-put ov 'cavemacs-tool-status 'running)
           (overlay-put ov 'cavemacs-tool-face face)
           (overlay-put ov 'cavemacs-header-beg (copy-marker start nil))
@@ -942,6 +972,33 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
         (cavemacs-render--apply-fringe start (1+ start) 'tool)))))
 
 (defun cavemacs-render--on-tool-update (_event) nil)
+
+(defun cavemacs-render--format-tool-args-full (args)
+  "Return a multi-line pretty-printed string of tool ARGS (alist).
+
+Each top-level key appears on its own line as `key:'; string values
+that span multiple lines are indented under the key.  Returns the
+empty string when ARGS has no displayable content."
+  (cond
+   ((null args) "")
+   ((stringp args) args)
+   ((listp args)
+    (string-join
+     (cl-loop for (k . v) in args
+              for key = (format "%s" k)
+              for val-str = (cond
+                             ((stringp v) v)
+                             (t (let ((print-length 64) (print-level 4))
+                                  (prin1-to-string v))))
+              collect
+              (if (string-match-p "\n" val-str)
+                  (concat key ":\n"
+                          (mapconcat (lambda (l) (concat "  " l))
+                                     (split-string val-str "\n" nil)
+                                     "\n"))
+                (format "%s: %s" key val-str)))
+     "\n"))
+   (t (format "%S" args))))
 
 (defun cavemacs-render--on-tool-end (event)
   "Append a result block under the matching tool overlay, then close the card."
@@ -961,6 +1018,8 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
           (save-excursion
             (goto-char (overlay-end ov))
             (let* ((text (cavemacs-render--render-tool-result result))
+                   (args (and ov (overlay-get ov 'cavemacs-tool-args)))
+                   (args-str (cavemacs-render--format-tool-args-full args))
                    (body-prefix (propertize
                                  (concat (cavemacs-pretty-glyph 'box-v) " ")
                                  'face rule-face
@@ -970,6 +1029,20 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                                                   "\n" nil)
                                     "\n"))
                    (body-beg (point)))
+              ;; Full input block (visible when expanded), then a
+              ;; separator rule, then the result body.
+              (when (and args-str (not (string-empty-p args-str)))
+                (insert (mapconcat (lambda (l) (concat body-prefix l))
+                                   (split-string args-str "\n" nil)
+                                   "\n"))
+                (insert "\n")
+                (let* ((sep-char (string-to-char
+                                  (cavemacs-pretty-glyph 'box-h)))
+                       (sep (concat (cavemacs-pretty-glyph 'box-v) " "
+                                    (make-string 8 sep-char))))
+                  (insert (propertize sep 'face rule-face
+                                      'cavemacs-rule t))
+                  (insert (propertize "\n" 'cavemacs-rule t))))
               (insert (propertize
                        body
                        'face (if is-error 'cavemacs-error-face
@@ -1193,7 +1266,8 @@ then under the project root."
 ;; Turn / agent end (footer)
 ;; -----------------------------------------------------------------------------
 
-(defun cavemacs-render--on-turn-end (_event) nil)
+(defun cavemacs-render--on-turn-end (_event)
+  (cavemacs-pretty-state-put :status 'idle))
 
 (defun cavemacs-render--on-agent-end (_event)
   "Insert a per-run footer with token / cost stats."

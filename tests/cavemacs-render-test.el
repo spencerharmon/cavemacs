@@ -73,7 +73,7 @@
           (let ((text (buffer-substring-no-properties (point-min) (point-max))))
             (should (string-match-p "You" text))
             (should (string-match-p "say pong" text))
-            (should (string-match-p "Assistant" text))
+            (should (string-match-p "Caveman" text))
             (should (string-match-p "pong" text))
             ;; Token footer:
             (should (string-match-p "1000 in / 1 out / 1001 total" text))
@@ -355,6 +355,132 @@ fall back to showing it raw with the sigil."
               (when (overlay-get ov 'cavemacs-file-path)
                 (setq found t)))
             (should-not found)))
+      (kill-buffer buf))))
+
+;; -----------------------------------------------------------------------------
+;; M13: header scoping + label + tool full-input on expand
+;; -----------------------------------------------------------------------------
+
+(ert-deftest cavemacs-render/tool-call-has-no-assistant-header ()
+  "Assistant message containing only a tool call must not emit a header."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "message_start")
+             (message . ((role . "assistant")
+                         (content . nil)
+                         (provider . "p") (model . "m")))))
+          (cavemacs-render-event
+           '((type . "tool_execution_start")
+             (toolCallId . "tc-noh")
+             (toolName . "bash")
+             (args . ((command . "ls")))))
+          (cavemacs-render-event
+           '((type . "tool_execution_end")
+             (toolCallId . "tc-noh")
+             (toolName . "bash")
+             (isError . :json-false)
+             (result . ((output . "out")))))
+          (cavemacs-render-event
+           '((type . "message_end")
+             (message . ((role . "assistant")
+                         (content . nil)
+                         (provider . "p") (model . "m")))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should-not (string-match-p "Caveman" text))))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-render/assistant-header-emitted-once-per-prose-message ()
+  "Mixed thinking + prose produces exactly one Caveman header line."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "message_start")
+             (message . ((role . "assistant")
+                         (content . nil)
+                         (provider . "p") (model . "m")))))
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "thinking_start") (contentIndex . 0)))))
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "thinking_delta") (contentIndex . 0)
+                 (delta . "hmm")))))
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "text_start") (contentIndex . 1)))))
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "text_delta") (contentIndex . 1)
+                 (delta . "hello")))))
+          (cavemacs-render-event
+           '((type . "message_end")
+             (message . ((role . "assistant")
+                         (content . (((text . "hello"))))
+                         (provider . "p") (model . "m")))))
+          (let* ((text (buffer-substring-no-properties (point-min) (point-max)))
+                 (count 0)
+                 (idx 0))
+            (while (and (string-match "Caveman" text idx))
+              (setq count (1+ count) idx (match-end 0)))
+            (should (= count 1))))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-render/tool-expand-shows-full-args ()
+  "Expanded tool body contains the full multi-line command arg."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "tool_execution_start")
+             (toolCallId . "tc-full")
+             (toolName . "bash")
+             (args . ((command . "echo one\necho two\necho three")))))
+          (cavemacs-render-event
+           '((type . "tool_execution_end")
+             (toolCallId . "tc-full")
+             (toolName . "bash")
+             (isError . :json-false)
+             (result . ((output . "done")))))
+          (cavemacs-render-expand-all)
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            ;; Collapsed header summary still present.
+            (should (string-match-p "command=" text))
+            ;; Full multi-line command body visible when expanded.
+            (should (string-match-p "echo one" text))
+            (should (string-match-p "echo two" text))
+            (should (string-match-p "echo three" text))
+            (should (string-match-p "done" text))))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-render/header-label-is-caveman ()
+  "Assistant header literal must be 'Caveman', not 'Assistant'."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "message_start")
+             (message . ((role . "assistant") (content . nil)
+                         (provider . "p") (model . "m")))))
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "text_delta") (contentIndex . 0)
+                 (delta . "hi")))))
+          (cavemacs-render-event
+           '((type . "message_end")
+             (message . ((role . "assistant")
+                         (content . (((text . "hi"))))
+                         (provider . "p") (model . "m")))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "Caveman" text))
+            (should-not (string-match-p "Assistant" text))))
       (kill-buffer buf))))
 
 (provide 'cavemacs-render-test)

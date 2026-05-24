@@ -77,6 +77,16 @@ so M-{ / M-} navigation can find turn boundaries."
              (message . ((role . "assistant")
                          (content . nil)
                          (provider . "p") (model . "m")))))
+          ;; M13: assistant header is deferred until first prose/thinking.
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "text_start") (contentIndex . 0)))))
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "text_delta") (contentIndex . 0)
+                 (delta . "hi")))))
           (let ((roles '()))
             (save-excursion
               (goto-char (point-min))

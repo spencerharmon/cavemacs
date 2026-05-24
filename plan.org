@@ -97,7 +97,19 @@ point-max after each render insert, when the user was at the bottom).
 
 ** Status
 
-Queued.
+Shipped v0.0.16. `cavemacs-shell-abort' is context-sensitive:
+- Busy: prompt via `cavemacs-shell--confirm-abort' (indirection
+  exists so tests can stub it without redefining `yes-or-no-p',
+  which triggers native-comp trampoline generation in batch).
+  On confirm, sends `abort' RPC.
+- Idle: walks point to point-max, ensures newline, calls
+  `cavemacs-shell--install-prompt' again to drop a fresh
+  separator + prefix + markers, moves point and every live
+  window-point to the new input area. Abandoned text stays in
+  the buffer between the OLD prompt prefix and the NEW
+  separator -- not sent, still copy-pasteable.
+Regression tests: `c-c-c-idle-abandons-line',
+`c-c-c-busy-aborts-on-confirm', `c-c-c-busy-declined-noop'.
 
 ** Goals
 
@@ -243,7 +255,14 @@ so =C-S-a= still sets mark correctly.
 
 ** Status
 
-Queued. Next milestone after M11 stabilises.
+Shipped v0.0.16. Assistant header (now labelled `Caveman') is
+deferred until first prose/thinking emission in a message;
+tool-only assistant messages render with no header. Tool cards
+render their full input arguments above the result, both
+included in the same collapsible body. Tests added per spec.
+(Tool-only-message detection works by deferring header emit;
+if a message ever produces tool calls AFTER prose, the header
+emitted on first prose is preserved -- correct.)
 
 ** Goals
 
