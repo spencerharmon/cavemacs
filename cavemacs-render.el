@@ -99,7 +99,7 @@ that the user can expand with TAB/RET/mouse-1."
   :type 'boolean
   :group 'cavemacs)
 
-(defcustom cavemacs-render-tool-default-collapsed nil
+(defcustom cavemacs-render-tool-default-collapsed t
   "When non-nil, tool-call body regions render collapsed by default.
 
 Collapsed bodies are replaced with a single summary line; the
@@ -242,7 +242,8 @@ kind (the prefix of ID up to the first colon)."
 (defun cavemacs-render-toggle-at-point ()
   "Toggle the collapsible block whose header is at point."
   (interactive)
-  (if-let* ((id (cavemacs-render--block-id-at (point))))
+  (if-let* ((id (or (cavemacs-render--block-id-at (point))
+                    (cavemacs-render--block-id-at (line-beginning-position)))))
       (cavemacs-render-toggle-block id)
     ;; Fall through to the previous binding so RET still submits
     ;; when called outside a header (e.g. in the input area).

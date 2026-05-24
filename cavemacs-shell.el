@@ -434,7 +434,8 @@ otherwise win the TAB key."
     (completion-at-point))
    ;; On a collapsible block header: toggle it. The buffer-local TAB
    ;; binding otherwise shadows the text-property keymap.
-   ((get-text-property (point) 'cavemacs-collapse-id)
+   ((or (get-text-property (point) 'cavemacs-collapse-id)
+         (get-text-property (line-beginning-position) 'cavemacs-collapse-id))
     (cavemacs-render-toggle-at-point))
    ;; Above the input area, no collapse target: regular indent.
    (t (indent-for-tab-command))))
@@ -459,7 +460,8 @@ otherwise win the TAB key."
    ;; On a collapsible block header above the input area: toggle it.
    ((and cavemacs-shell--input-start-marker
          (< (point) (marker-position cavemacs-shell--input-start-marker))
-         (get-text-property (point) 'cavemacs-collapse-id))
+         (or (get-text-property (point) 'cavemacs-collapse-id)
+             (get-text-property (line-beginning-position) 'cavemacs-collapse-id)))
     (cavemacs-render-toggle-at-point))
    ((or (not cavemacs-shell--input-start-marker)
         (< (point) (marker-position cavemacs-shell--input-start-marker)))
