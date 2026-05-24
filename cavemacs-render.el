@@ -647,12 +647,8 @@ messages render with no header at all."
 (defun cavemacs-render--maybe-emit-header (ov)
   "If OV has a deferred header and any prose/thinking is present, emit it."
   (let ((header (overlay-get ov 'cavemacs-header-text))
-        (text (or (overlay-get ov 'cavemacs-text) ""))
-        (thinking (or (overlay-get ov 'cavemacs-thinking) "")))
-    (when (and header
-               (or (not (string-empty-p text))
-                   (and cavemacs-render-show-thinking
-                        (not (string-empty-p thinking)))))
+        (text (or (overlay-get ov 'cavemacs-text) "")))
+    (when (and header (not (string-empty-p text)))
       (let* ((body-start (overlay-get ov 'cavemacs-body-start))
              (inhibit-read-only t))
         (save-excursion

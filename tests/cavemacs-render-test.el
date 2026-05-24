@@ -361,6 +361,28 @@ fall back to showing it raw with the sigil."
 ;; M13: header scoping + label + tool full-input on expand
 ;; -----------------------------------------------------------------------------
 
+(ert-deftest cavemacs-render/thinking-only-message-has-no-header ()
+  "Assistant message with only thinking (no prose, no tools) must not emit a header."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "message_start")
+             (message . ((role . "assistant")
+                         (content . nil)
+                         (provider . "p") (model . "m")))))
+          (cavemacs-render-event '((type . "thinking_start"))) 
+          (cavemacs-render-event '((type . "thinking_delta") (delta . "musing")))
+          (cavemacs-render-event '((type . "thinking_end")))
+          (cavemacs-render-event
+           '((type . "message_end")
+             (message . ((role . "assistant")
+                         (content . nil)
+                         (provider . "p") (model . "m")))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should-not (string-match-p "Caveman" text))))
+      (kill-buffer buf))))
+
 (ert-deftest cavemacs-render/tool-call-has-no-assistant-header ()
   "Assistant message containing only a tool call must not emit a header."
   (let ((buf (cavemacs-render-test--fresh-buffer)))
