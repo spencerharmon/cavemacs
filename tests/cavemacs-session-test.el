@@ -92,6 +92,28 @@
       (should (string-match-p "implement the M11"
                               (plist-get m :name))))))
 
+(ert-deftest cavemacs-session/meta-name-skips-slash-command-prompts ()
+  "Slash-command user messages (e.g. /caveman full auto-trigger) must not
+become the synthesized session name; fall through to the next real prompt."
+  (cavemacs-session-test--with-temp-session path
+      '(((type . "session") (id . "s") (cwd . "/x"))
+        ((type . "message")
+         (message . ((role . "user") (content . "/caveman full"))))
+        ((type . "message")
+         (message . ((role . "user") (content . "real first prompt")))))
+    (let ((m (cavemacs-session--meta path)))
+      (should (string-match-p "real first prompt"
+                              (plist-get m :name))))))
+
+(ert-deftest cavemacs-session/meta-name-nil-when-only-slash-commands ()
+  "If every user message is a slash command, no fallback name is synthesized."
+  (cavemacs-session-test--with-temp-session path
+      '(((type . "session") (id . "s") (cwd . "/x"))
+        ((type . "message")
+         (message . ((role . "user") (content . "/caveman full")))))
+    (let ((m (cavemacs-session--meta path)))
+      (should (null (plist-get m :name))))))
+
 (ert-deftest cavemacs-session/meta-name-truncates-long-fallback ()
   (let ((long (make-string 200 ?x)))
     (cavemacs-session-test--with-temp-session path

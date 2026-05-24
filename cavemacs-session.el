@@ -121,8 +121,14 @@ Plist keys:
                        (when (equal role "user")
                          (cl-incf turns)
                          (unless first-user-text
-                           (setq first-user-text
-                                 (cavemacs-session--first-user-text obj))))
+                           (let ((txt (cavemacs-session--first-user-text obj)))
+                             (when (and txt
+                                        (not (string-empty-p
+                                              (string-trim txt)))
+                                        (not (string-prefix-p
+                                              "/"
+                                              (string-trim txt))))
+                               (setq first-user-text txt)))))
                        ;; Assistant messages also carry the model in
                        ;; effect at the time the reply was generated.
                        (when (equal role "assistant")
