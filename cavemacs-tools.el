@@ -148,11 +148,27 @@ calls will execute without user prompt."
                cavemacs-shell--prompt-marker)
       (cavemacs-render--notice (format "● %s" msg) face))))
 
+(defvar-local cavemacs-tools--extension-statuses nil
+  "Alist of (KEY . TEXT) for extension statuses set via `setStatus'.
+Not surfaced in the modeline: the modeline reflects session state
+(thinking/tool/idle/model) and extensions would otherwise clobber
+it with arbitrary text (e.g. tool output).")
+
 (defun cavemacs-tools--set-status (req)
-  "Reflect a `setStatus' request in the modeline."
-  (when (and (boundp 'cavemacs-shell--mode-line-info))
-    (let ((text (alist-get 'statusText req)))
-      (cavemacs-shell--set-mode-info (or text "idle")))))
+  "Record a `setStatus' request without touching the modeline.
+Upstream's TUI surfaces these in a dedicated footer slot keyed by
+`statusKey'; we just remember them so future UI work can show them
+separately.  Crucially we do NOT push the text into
+`cavemacs-shell--mode-line-info', because extensions push large /
+tool-output-shaped strings here and would otherwise wreck the
+session-state modeline."
+  (let ((key (alist-get 'statusKey req))
+        (text (alist-get 'statusText req)))
+    (when key
+      (setq cavemacs-tools--extension-statuses
+            (assoc-delete-all key cavemacs-tools--extension-statuses))
+      (when text
+        (push (cons key text) cavemacs-tools--extension-statuses)))))
 
 (defun cavemacs-tools--set-editor-text (req)
   "Replace the input area with REQ's text (used by some extensions)."

@@ -437,7 +437,7 @@ otherwise win the TAB key."
    ((get-text-property (point) 'cavemacs-collapse-id)
     (cavemacs-render-toggle-at-point))
    ;; Above the input area, no collapse target: regular indent.
-   (t (indent-for-tab-command)))))
+   (t (indent-for-tab-command))))
 
 (defun cavemacs-shell-self-insert-slash ()
   "Insert / and trigger slash-command completion if at start of input."
