@@ -3,7 +3,7 @@
 #+STARTUP: overview
 #+OPTIONS: toc:2 num:nil
 
-* Status: v0.1.0 SHIPPED; R1/R2 fixed; M10 added in post-v0.1.0 patches
+* Status: v0.0.12 in-progress on collapsible blocks; v0.1.0 SHIPPED; R1/R2/R3 fixed; M10/M11 in post-v0.1.0 patches
 
 All milestones M0–M8 complete plus M10 (slash command dispatch +
 in-prompt autocomplete).  M9 stretch deferred.  See =CHANGELOG.md=.
@@ -154,6 +154,71 @@ Before this is in scope:
 - =cavemacs-pretty.el= (header-line worker count, optional)
 
 * M11 — Collapsible thinking text and tool-call blocks
+
+** Status
+
+In progress, shipping iteratively as v0.0.X patch releases. As of
+v0.0.12 thinking and tool blocks both render collapsed-by-default
+with TAB/RET toggle; chasing residual rendering bugs from real
+caveman event shapes.
+
+** Bugs fixed during M11 implementation (chronological)
+
+Each was discovered only after real-LLM session testing; unit
+tests passed throughout but didn't exercise the relevant shape.
+
+- R-M11.1 (=00fc53c=, v0.0.x line begins): collapse body overlays
+  created with =rear-advance=t= grew with every subsequent insertion,
+  swallowing later assistant prose into the invisible region.
+  Fix: =rear-advance=nil=.
+- R-M11.2 (=a3e0131=): TAB/RET in shell buffer were bound
+  buffer-wide to =cavemacs-shell-complete= / =-send-or-newline=,
+  shadowing the text-property keymap installed on collapse headers.
+  Fix: both commands now check for =cavemacs-collapse-id= at point
+  and dispatch to =cavemacs-render-toggle-at-point= first.
+- R-M11.3 (=acd7f24=): tool-card header positions were stored as
+  raw integers in overlay props. Intervening insertions made the
+  integers stale; =register-block= tagged the wrong region. Fix:
+  store as markers.
+- R-M11.4 (=4c6a840=): =cavemacs-render-tool-default-collapsed=
+  was nil; flipped to t.
+- R-M11.5 (=307e3e4=): assistant/user message overlays were
+  created with =rear-advance=t=. A tool card inserted at the
+  prompt marker (same position as the overlay end) ended up
+  *inside* the assistant overlay; the next =message_update= repaint
+  ran =(delete-region body-start ov-end)= and wiped the tool card,
+  including its =cavemacs-collapse-id= property. Fix: assistant
+  + user overlays use =rear-advance=nil=.
+- R-M11.6 (=e131446=): tool =cavemacs-header-end= marker was
+  rear-advancing. During tool execution every subsequent insertion
+  pushed it forward by hundreds of chars; by =--on-tool-end= time,
+  =register-block= tagged a 400-char swath that didn't include the
+  header line. Fix: non-advancing marker.
+- R-M11.7 (=b60e8bd=): =cavemacs-render--render-tool-result=
+  didn't understand caveman's content-parts shape
+  (=[((type . "text") (text . "..."))]=); threw stringp error,
+  aborting =--on-tool-end= before =register-block= ran. Tools were
+  stuck status=running with no collapse property. Fix: add
+  content-parts branch (and tighten alist detection so plain
+  =((output . "z"))= doesn't false-positive into it).
+- R-M11.8 (=ccd53c0=): caveman emits tool output BOTH as a
+  =tool_execution_end= event (rendered in the tool card) AND as a
+  =message_start= with role=toolResult containing the same text.
+  The default 'unknown role' branch rendered the latter as
+  =[toolResult]= + raw text, duplicating the body. Fix: explicit
+  pcase arms for =tool=/=toolResult=/=tool_result= that no-op.
+- R-M11.9 (=e22836c=): collapsed body overlay's =before-string=
+  summary contained a newline. Emacs treated it as a virtual
+  visual line; C-p past the close-box rule got stuck. Fix: drop
+  the summary string.
+
+Lessons:
+- =rear-advance= on long-lived overlays is almost always wrong.
+- Always store text positions as markers when there's any insertion
+  between recording and use.
+- Real caveman events don't match the type signatures we assumed
+  from =docs/api.md=; trust =rpc-types.ts= and instrument before
+  designing handlers.
 
 ** Goal
 
