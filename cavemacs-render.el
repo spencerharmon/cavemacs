@@ -282,7 +282,7 @@ regenerated every delta)."
     (when-let* ((old (and cavemacs-render--collapse-overlays
                           (gethash id cavemacs-render--collapse-overlays))))
       (delete-overlay old))
-    (let ((ov (make-overlay body-beg body-end nil nil t)))
+    (let ((ov (make-overlay body-beg body-end nil nil nil)))
       (overlay-put ov 'cavemacs-block-id id)
       (overlay-put ov 'cavemacs-summary summary)
       (overlay-put ov 'evaporate t)

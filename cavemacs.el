@@ -28,6 +28,31 @@
 
 ;;; Code:
 
+(defconst cavemacs--version-file
+  (expand-file-name ".cavemacs-version"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "File storing the auto-incrementing reload version.")
+
+(defun cavemacs--bump-version ()
+  "Read MAJOR.MINOR.PATCH from `cavemacs--version-file', bump PATCH, write back.
+Return the new version string."
+  (let* ((raw (when (file-readable-p cavemacs--version-file)
+                (with-temp-buffer
+                  (insert-file-contents cavemacs--version-file)
+                  (string-trim (buffer-string)))))
+         (parts (mapcar #'string-to-number
+                        (split-string (or raw "0.1.0") "\\." t)))
+         (major (or (nth 0 parts) 0))
+         (minor (or (nth 1 parts) 1))
+         (patch (1+ (or (nth 2 parts) 0)))
+         (new (format "%d.%d.%d" major minor patch)))
+    (with-temp-file cavemacs--version-file
+      (insert new "\n"))
+    new))
+
+(defconst cavemacs-version (cavemacs--bump-version)
+  "Cavemacs version. PATCH auto-increments on every load/reload.")
+
 (require 'cavemacs-config)
 (require 'cavemacs-rpc)
 (require 'cavemacs-project)

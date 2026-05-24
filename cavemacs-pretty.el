@@ -310,7 +310,9 @@ Code blocks and the input area remain monospace regardless."
          (meta 'cavemacs-pretty-meta-face))
     (concat
      " "
-     (propertize "cavemacs" 'face '(:weight bold))
+     (propertize (format "cavemacs %s"
+                         (or (bound-and-true-p cavemacs-version) ""))
+                 'face '(:weight bold))
      (when (and proj (not (string-empty-p proj)))
        (concat "  " (propertize proj 'face meta)))
      (when (or prov mod)
