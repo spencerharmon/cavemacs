@@ -3,7 +3,7 @@
 #+STARTUP: overview
 #+OPTIONS: toc:2 num:nil
 
-* Status: v0.0.14 — tool-card copy strips box rules; M11 collapsible-blocks bug-chain stable
+* Status: v0.0.15 — prose body kill/yank strips `│ ' rule prefix; tool-card box rules already stripped (v0.0.14)
 
 All milestones M0–M8 complete plus M10 (slash command dispatch +
 in-prompt autocomplete).  M9 stretch deferred.  See =CHANGELOG.md=.
@@ -92,6 +92,131 @@ asserts `(eobp)' *without* a manual goto-char first.
 
 Fix: same as R1 (advance point + every window-point to the new
 point-max after each render insert, when the user was at the bottom).
+
+* M14 — `C-c C-c' shell control: abort if busy, abandon prompt if idle
+
+** Status
+
+Queued.
+
+** Goals
+
+1. *Busy path.* When the agent is mid-turn (any in-flight
+   prompt / tool execution / streaming response), pressing
+   =C-c C-c= in the shell buffer prompts in the minibuffer
+   (=y-or-n-p= / =yes-or-no-p=, TBD) whether to abort. On
+   confirmation, send the caveman =abort= RPC verb and let the
+   normal =turn_end= / =agent_end= path clean up. On decline,
+   no-op.
+2. *Idle path.* When the agent is NOT busy, =C-c C-c= abandons
+   the current shell input line *in place* (the typed text is
+   left in the buffer as part of the scrollback, NOT sent to
+   the agent), emits a fresh separator + prompt at
+   =point-max=, repositions =cavemacs-shell--prompt-marker= and
+   =cavemacs-shell--input-start-marker= to the new prompt, and
+   moves point (and every live window-point displaying the
+   buffer) to the new input start.
+
+   Rationale: lets the user back out of a half-written prompt
+   without manually selecting and deleting it. Mirrors the
+   common bash/zsh =C-c= reflex ("forget this line, give me a
+   fresh one"). Keeping the abandoned text visible preserves
+   the user's context for copy-paste rather than discarding
+   it.
+
+** Implementation sketch
+
+- New command =cavemacs-shell-cancel-or-reset=. Dispatch on
+  =cavemacs-shell--busy-p= (derive from
+  =cavemacs-render--current-assistant-ov= /
+  =cavemacs-render--busy= -- pick one canonical source; see M15
+  below for cleanup).
+- Busy branch: =(when (yes-or-no-p "Abort in-flight turn? ")
+  (cavemacs-rpc-send `((type . "abort"))))=.
+- Idle branch:
+  - Strip the read-only / =field= properties from the current
+    input line so the abandoned text behaves like normal
+    scrollback (still visible, still selectable, no longer the
+    live prompt).
+  - Move to =point-max=, =insert= a newline if needed.
+  - Call the same prompt-rendering helper used by
+    =cavemacs-shell--insert-prompt= (factor it out if it's not
+    already a standalone function).
+  - Update =prompt-marker= / =input-start-marker= to the new
+    locations.
+  - =goto-char input-start-marker=; mirror on every window
+    displaying the buffer.
+- Bind in =cavemacs-shell-mode-map=: =C-c C-c=.
+
+** Tests to add
+
+- =cavemacs-shell/c-c-c-idle-abandons-line=: type input, force
+  busy=nil, call command, assert (a) abandoned text still in
+  buffer, (b) new prompt prefix appears below, (c) point is at
+  the new input-start-marker, (d) the old text is NOT sent
+  (mock =cavemacs-rpc-send= and assert no =prompt= verb fired).
+- =cavemacs-shell/c-c-c-busy-aborts=: force busy=t, stub
+  =yes-or-no-p= → t, assert an =abort= RPC verb was sent.
+- =cavemacs-shell/c-c-c-busy-declined-noop=: stub →nil, assert
+  no RPC sent and the input area is untouched.
+
+** Related files
+
+- =cavemacs-shell.el= (new command + binding; possibly factor
+  out the prompt-render helper)
+- =cavemacs-rpc.el= (no change; =abort= verb already exists per
+  AGENTS.md §5)
+- =tests/cavemacs-commands-test.el= or a new
+  =tests/cavemacs-shell-test.el=
+
+* Bug: header-line busy indicator never clears
+
+** Symptom
+
+The pretty header-line's busy/idle indicator (top of the shell
+buffer) is stuck on "busy" even when the agent is fully idle
+(no streaming response, no in-flight tool, prompt is editable,
+RET sends fine). It updates *into* the busy state at turn
+start but never updates back to idle on =turn_end= /
+=agent_end=.
+
+** Suspected cause
+
+One of:
+- =cavemacs-render--on-turn-end= / =--on-agent-end= isn't
+  clearing the busy flag (or is clearing a different flag
+  than the header-line reads).
+- Header-line is computed from one source
+  (e.g. =cavemacs-render--current-assistant-ov=) but the
+  termination handler clears another (a separate
+  =cavemacs--busy= var) and the two have drifted apart.
+- =force-mode-line-update= isn't being called on the right
+  buffer after the state flips, so the displayed string is
+  stale.
+
+Needs a single-source-of-truth audit: pick ONE canonical busy
+predicate, route every state transition through it, and have
+the header-line + =C-c C-c= dispatcher + any other consumer
+read from that one source.
+
+** Task
+
+Ensure ALL status fields shown in the header-line update
+dynamically and correctly across the full session lifecycle:
+agent_start / turn_start / message_start / tool_execution_*
+/ turn_end / agent_end / abort / error. Add a regression test
+that drives the synthetic event sequence and asserts the
+busy indicator (and any other status field -- model, token
+count, cost) reads the expected value after each phase.
+
+** Related files
+
+- =cavemacs-pretty.el= (header-line formatter)
+- =cavemacs-render.el= (busy-flag transitions on lifecycle
+  events)
+- =cavemacs-shell.el= (consumes the busy flag for input
+  affordances; will also consume it for M14)
+- =tests/cavemacs-render-test.el= (lifecycle-state assertions)
 
 * Bugfix: C-a moves point into read-only prompt
 

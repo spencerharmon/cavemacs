@@ -385,9 +385,12 @@ after BODY runs so RET continues to submit the next prompt."
 ;; -----------------------------------------------------------------------------
 
 (defun cavemacs-render--rule-prefix (face)
-  "Return the propertized left-rule prefix string for a turn body line."
+  "Return the propertized left-rule prefix string for a turn body line.
+Tagged with `cavemacs-rule' so kill/yank strips it (see
+`cavemacs-shell--filter-buffer-substring')."
   (propertize (concat (cavemacs-pretty-glyph 'cont) "  ")
-              'face face))
+              'face face
+              'cavemacs-rule t))
 
 (defun cavemacs-render--header-line (role glyph face title meta)
   "Return a propertized single-line bubble header.

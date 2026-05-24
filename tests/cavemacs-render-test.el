@@ -127,6 +127,36 @@
             (should (string-match-p "file2" copied))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-render/prose-copy-strips-rule-glyphs ()
+  "Kill/yank on assistant prose body must not pull `│ ' line prefixes."
+  (require 'cavemacs-shell)
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "message_start")
+             (message . ((role . "assistant")
+                         (content . nil)))))
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "text_start") (contentIndex . 0)))))
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "text_delta") (contentIndex . 0)
+                 (delta . "line one\nline two\nline three")))))
+          (cavemacs-render-event
+           '((type . "message_end")
+             (message . ((role . "assistant")
+                         (content . (((text . "line one\nline two\nline three"))))))))
+          (let* ((copied (filter-buffer-substring (point-min) (point-max))))
+            (should-not (string-match-p "│" copied))
+            (should (string-match-p "line one" copied))
+            (should (string-match-p "line two" copied))
+            (should (string-match-p "line three" copied))))
+      (kill-buffer buf))))
+
 (ert-deftest cavemacs-render/handles-unknown-event-types ()
   (let ((buf (cavemacs-render-test--fresh-buffer)))
     (unwind-protect
