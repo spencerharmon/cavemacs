@@ -114,6 +114,29 @@ become the synthesized session name; fall through to the next real prompt."
     (let ((m (cavemacs-session--meta path)))
       (should (null (plist-get m :name))))))
 
+(ert-deftest cavemacs-session/meta-name-strips-leading-skill-xml ()
+  "A user message that begins with an injected <skill>...</skill> block
+should be stripped before naming; the real prompt text wins."
+  (cavemacs-session-test--with-temp-session path
+      '(((type . "session") (id . "s") (cwd . "/x"))
+        ((type . "message")
+         (message . ((role . "user")
+                     (content . "<skill name=\"browser-tools\" location=\"/x\">\nblah blah\n</skill>\nactual user question here")))))
+    (let ((m (cavemacs-session--meta path)))
+      (should (string-match-p "actual user question"
+                              (plist-get m :name))))))
+
+(ert-deftest cavemacs-session/meta-name-strips-slash-then-uses-rest ()
+  "Slash trigger followed by real content on later lines: real content wins."
+  (cavemacs-session-test--with-temp-session path
+      '(((type . "session") (id . "s") (cwd . "/x"))
+        ((type . "message")
+         (message . ((role . "user")
+                     (content . "/caveman full\nreal first prompt body")))))
+    (let ((m (cavemacs-session--meta path)))
+      (should (string-match-p "real first prompt"
+                              (plist-get m :name))))))
+
 (ert-deftest cavemacs-session/meta-name-truncates-long-fallback ()
   (let ((long (make-string 200 ?x)))
     (cavemacs-session-test--with-temp-session path

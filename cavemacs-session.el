@@ -54,6 +54,24 @@ preview (name, model, turn count) may be slightly stale."
             (push f out))))
       out)))
 
+(defun cavemacs-session--strip-injection-prefix (text)
+  "Strip leading skill/XML blocks and slash-command lines from TEXT.
+
+Caveman skills inject XML payloads (e.g. `<skill name=...>...</skill>')
+as user messages, and cavemacs auto-sends slash triggers like
+`/caveman full' at session start. Neither is useful for naming a
+session in the picker. Return the remaining trimmed text (may be \"\")."
+  (let ((s (or text "")))
+    ;; Drop balanced leading <tag ...>...</tag> blocks (skill XML).
+    (while (string-match
+            "\\`[ \t\n\r]*<\\([A-Za-z_][A-Za-z0-9_:-]*\\)\\(?:[ \t\n][^>]*\\)?>\\(?:.\\|\n\\)*?</\\1>[ \t\n\r]*"
+            s)
+      (setq s (substring s (match-end 0))))
+    ;; Drop leading slash-command lines (one per line).
+    (while (string-match "\\`[ \t]*/[^\n]*\n?" s)
+      (setq s (substring s (match-end 0))))
+    (string-trim s)))
+
 (defun cavemacs-session--first-user-text (obj)
   "Extract a short single-line excerpt from an obj's user-message content."
   (let* ((msg (alist-get 'message obj))
@@ -121,13 +139,10 @@ Plist keys:
                        (when (equal role "user")
                          (cl-incf turns)
                          (unless first-user-text
-                           (let ((txt (cavemacs-session--first-user-text obj)))
-                             (when (and txt
-                                        (not (string-empty-p
-                                              (string-trim txt)))
-                                        (not (string-prefix-p
-                                              "/"
-                                              (string-trim txt))))
+                           (let* ((raw (cavemacs-session--first-user-text obj))
+                                  (txt (cavemacs-session--strip-injection-prefix
+                                        raw)))
+                             (when (and txt (not (string-empty-p txt)))
                                (setq first-user-text txt)))))
                        ;; Assistant messages also carry the model in
                        ;; effect at the time the reply was generated.

@@ -56,7 +56,7 @@ or per-form =:straight=):
 #+begin_src elisp
 (use-package cavemacs
   :straight (:type git :host github :repo "spencerharmon/cavemacs")
-  :commands (cavemacs cavemacs-new cavemacs-continue cavemacs-session-browser)
+  :commands (cavemacs cavemacs-new cavemacs-continue cavemacs-session cavemacs-session-browser)
   :custom
   (cavemacs-default-provider "github-copilot"))
 #+end_src
@@ -148,10 +148,11 @@ Outside any cavemacs buffer:
 
 | Key                 | Action                                  |
 |---------------------+-----------------------------------------|
-| =M-x cavemacs=      | Open / resume for current project       |
-| =M-x cavemacs-new=  | Always create a fresh buffer            |
+| =M-x cavemacs=      | Start a fresh session for current project |
+| =M-x cavemacs-new=  | Alias for =cavemacs= (back-compat)        |
 | =M-x cavemacs-continue= | Resume most recent session for project |
-| =M-x cavemacs-session-browser= | Browse + resume / fork / delete |
+| =M-x cavemacs-session= | Open session picker (resume / fork / delete) |
+| =M-x cavemacs-session-browser= | Same as =cavemacs-session=, explicit name |
 | =M-x cavemacs-cavekit= | Cavekit /ck:spec / /ck:build / /ck:check |
 | =M-x cavemacs-cavemem-search= | =/memory search ...= in session |
 | =M-x cavemacs-cavemem-viewer= | Open http://127.0.0.1:37777     |
