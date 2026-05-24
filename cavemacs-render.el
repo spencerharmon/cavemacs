@@ -762,12 +762,12 @@ messages render with no header at all."
                 (when msg-key
                   (cavemacs-render--register-block
                    (format "thinking:%s" msg-key)
-                   header-beg header-end body-beg body-end nil)))
-              (insert "\n")))
+                   header-beg header-end body-beg body-end nil)))))
           (let ((text-start (point)))
-            (insert (cavemacs-render--indent-body text face))
-            (unless (eq (char-before) ?\n) (insert "\n"))
-            (insert "\n")
+            (unless (string-empty-p text)
+              (insert (cavemacs-render--indent-body text face))
+              (unless (eq (char-before) ?\n) (insert "\n"))
+              (insert "\n"))
             (cond
              (is-error
               (put-text-property text-start (point) 'face
