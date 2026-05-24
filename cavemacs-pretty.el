@@ -382,40 +382,45 @@ When enabled:
 ;; -----------------------------------------------------------------------------
 
 (defface cavemacs-pretty-banner-lava-1
-  '((t :foreground "#fff2a8" :weight bold))
+  '((t :foreground "#fff2a8" :background "#0f0a14" :weight bold))
   "Top highlight (yellow) for the CAVEMACS lava banner."
   :group 'cavemacs-pretty)
 
 (defface cavemacs-pretty-banner-lava-2
-  '((t :foreground "#ffb347" :weight bold))
+  '((t :foreground "#ffb347" :background "#0f0a14" :weight bold))
   "Mid (orange) for the CAVEMACS lava banner."
   :group 'cavemacs-pretty)
 
 (defface cavemacs-pretty-banner-lava-3
-  '((t :foreground "#e8541f" :weight bold))
+  '((t :foreground "#e8541f" :background "#0f0a14" :weight bold))
   "Lower (deep orange) for the CAVEMACS lava banner."
   :group 'cavemacs-pretty)
 
 (defface cavemacs-pretty-banner-lava-shadow
-  '((t :foreground "#7a1a0a"))
+  '((t :foreground "#7a1a0a" :background "#0f0a14"))
   "Shadow/depth (dark red) for the CAVEMACS lava banner."
   :group 'cavemacs-pretty)
 
+(defface cavemacs-pretty-banner-backdrop
+  '((t :background "#0f0a14" :extend t))
+  "Backdrop fill behind the splash banner; high contrast vs lava + rock."
+  :group 'cavemacs-pretty)
+
 (defface cavemacs-pretty-banner-rock-hi
-  '((t :foreground "#c9c1b4"))
-  "Rock highlight (light grey)." :group 'cavemacs-pretty)
+  '((t :foreground "#d6b48a" :background "#0f0a14"))
+  "Rock highlight (warm tan)." :group 'cavemacs-pretty)
 
 (defface cavemacs-pretty-banner-rock-md
-  '((t :foreground "#8a8478"))
-  "Rock midtone (grey)." :group 'cavemacs-pretty)
+  '((t :foreground "#a07848" :background "#0f0a14"))
+  "Rock midtone (brown)." :group 'cavemacs-pretty)
 
 (defface cavemacs-pretty-banner-rock-lo
-  '((t :foreground "#4a443c"))
-  "Rock shadow (dark grey)." :group 'cavemacs-pretty)
+  '((t :foreground "#6b4a2b" :background "#0f0a14"))
+  "Rock shadow (dark brown)." :group 'cavemacs-pretty)
 
 (defface cavemacs-pretty-banner-rock-deep
-  '((t :foreground "#23201c"))
-  "Rock deep shadow (near black)." :group 'cavemacs-pretty)
+  '((t :foreground "#3a2616" :background "#0f0a14"))
+  "Rock deep shadow (near-black brown)." :group 'cavemacs-pretty)
 
 (defconst cavemacs-pretty--banner-lines
   '("  ██████╗  █████╗ ██╗   ██╗███████╗███╗   ███╗ █████╗  ██████╗███████╗"
@@ -454,24 +459,37 @@ When enabled:
 
 (defun cavemacs-pretty-banner-string ()
   "Return the multi-color CAVEMACS banner as a propertized string."
-  (let ((out (list)))
+  (let* ((width (1+ (apply #'max (mapcar #'length
+                                         cavemacs-pretty--banner-lines))))
+         (out (list))
+         ;; Top/bottom padding rows of pure backdrop for breathing room.
+         (pad-row (concat (propertize (make-string width ?\s)
+                                      'face 'cavemacs-pretty-banner-backdrop)
+                          "\n")))
+    (push pad-row out)
     (cl-loop for line in cavemacs-pretty--banner-lines
              for idx from 0 do
-             ;; Rock starts at the run of spaces near col ~75; detect per-char
-             ;; by tracking whether we've passed the letters region.
-             (let ((rock-start
-                    ;; Heuristic: rock glyphs only appear at column >= 75.
-                    75))
+             (let ((rock-start 75)
+                   (line-out (list)))
                (cl-loop for ch across line
                         for col from 0 do
                         (let* ((in-rock (>= col rock-start))
                                (face (cavemacs-pretty--banner-face-for
                                       ch col idx in-rock)))
-                          (push (if face
-                                    (propertize (string ch) 'face face)
-                                  (string ch))
-                                out))))
-             (push "\n" out))
+                          (push (propertize
+                                 (string ch)
+                                 'face (or face
+                                           'cavemacs-pretty-banner-backdrop))
+                                line-out)))
+               ;; Right-pad to fixed width with backdrop.
+               (let ((pad (- width (length line))))
+                 (when (> pad 0)
+                   (push (propertize (make-string pad ?\s)
+                                     'face 'cavemacs-pretty-banner-backdrop)
+                         line-out)))
+               (push (apply #'concat (nreverse line-out)) out)
+               (push "\n" out)))
+    (push pad-row out)
     (apply #'concat (nreverse out))))
 
 (defun cavemacs-pretty-indent-string (s prefix)
