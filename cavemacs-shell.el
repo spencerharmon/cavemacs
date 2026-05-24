@@ -220,6 +220,7 @@ unexpected provider, etc.) the banner is the single source of
 truth for what cavemacs handed to the subprocess."
   (let ((inhibit-read-only t)
         (args (ignore-errors (cavemacs--default-process-args))))
+    (insert (cavemacs-pretty-banner-string))
     (insert
      (propertize
       (concat

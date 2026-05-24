@@ -377,6 +377,103 @@ When enabled:
   "Return a short HH:MM timestamp string for header lines."
   (format-time-string "%H:%M"))
 
+;; -----------------------------------------------------------------------------
+;; Splash banner: 3D "CAVEMACS" + shaded rock
+;; -----------------------------------------------------------------------------
+
+(defface cavemacs-pretty-banner-lava-1
+  '((t :foreground "#fff2a8" :weight bold))
+  "Top highlight (yellow) for the CAVEMACS lava banner."
+  :group 'cavemacs-pretty)
+
+(defface cavemacs-pretty-banner-lava-2
+  '((t :foreground "#ffb347" :weight bold))
+  "Mid (orange) for the CAVEMACS lava banner."
+  :group 'cavemacs-pretty)
+
+(defface cavemacs-pretty-banner-lava-3
+  '((t :foreground "#e8541f" :weight bold))
+  "Lower (deep orange) for the CAVEMACS lava banner."
+  :group 'cavemacs-pretty)
+
+(defface cavemacs-pretty-banner-lava-shadow
+  '((t :foreground "#7a1a0a"))
+  "Shadow/depth (dark red) for the CAVEMACS lava banner."
+  :group 'cavemacs-pretty)
+
+(defface cavemacs-pretty-banner-rock-hi
+  '((t :foreground "#c9c1b4"))
+  "Rock highlight (light grey)." :group 'cavemacs-pretty)
+
+(defface cavemacs-pretty-banner-rock-md
+  '((t :foreground "#8a8478"))
+  "Rock midtone (grey)." :group 'cavemacs-pretty)
+
+(defface cavemacs-pretty-banner-rock-lo
+  '((t :foreground "#4a443c"))
+  "Rock shadow (dark grey)." :group 'cavemacs-pretty)
+
+(defface cavemacs-pretty-banner-rock-deep
+  '((t :foreground "#23201c"))
+  "Rock deep shadow (near black)." :group 'cavemacs-pretty)
+
+(defconst cavemacs-pretty--banner-lines
+  '("  ██████╗  █████╗ ██╗   ██╗███████╗███╗   ███╗ █████╗  ██████╗███████╗"
+    " ██╔════╝ ██╔══██╗██║   ██║██╔════╝████╗ ████║██╔══██╗██╔════╝██╔════╝"
+    " ██║      ███████║██║   ██║█████╗  ██╔████╔██║███████║██║     ███████╗"
+    " ██║      ██╔══██║╚██╗ ██╔╝██╔══╝  ██║╚██╔╝██║██╔══██║██║     ╚════██║         ▄▄████▄▄"
+    " ╚██████╗ ██║  ██║ ╚████╔╝ ███████╗██║ ╚═╝ ██║██║  ██║╚██████╗███████║      ▄██████████▄"
+    "  ╚═════╝ ╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝     ███▓▓██████▓██"
+    "                                                                           ████▓▓████▓▓██▌"
+    "                                                                           ▐███▓▒▒▓▓▒▒▓██▌"
+    "                                                                            ▀███▒░░▒▒░░██▀"
+    "                                                                              ▀▀████████▀")
+  "Raw lines for the splash banner. Coloring applied char-wise.")
+
+(defun cavemacs-pretty--banner-face-for (ch _col line-idx in-rock)
+  "Pick a face for CH at LINE-IDX. IN-ROCK selects rock palette."
+  (cond
+   (in-rock
+    (pcase ch
+      ((or ?█ ?▌ ?▐) 'cavemacs-pretty-banner-rock-deep)
+      (?▓            'cavemacs-pretty-banner-rock-lo)
+      (?▒            'cavemacs-pretty-banner-rock-md)
+      (?░            'cavemacs-pretty-banner-rock-hi)
+      ((or ?▄ ?▀)    'cavemacs-pretty-banner-rock-md)
+      (_             nil)))
+   (t
+    ;; Letter face: lava gradient by line-idx, depth chars are shadow.
+    (pcase ch
+      ((or ?╔ ?╗ ?╝ ?╚ ?═ ?║) 'cavemacs-pretty-banner-lava-shadow)
+      (?█
+       (pcase line-idx
+         ((or 0 1) 'cavemacs-pretty-banner-lava-1)
+         ((or 2 3) 'cavemacs-pretty-banner-lava-2)
+         (_        'cavemacs-pretty-banner-lava-3)))
+      (_ nil)))))
+
+(defun cavemacs-pretty-banner-string ()
+  "Return the multi-color CAVEMACS banner as a propertized string."
+  (let ((out (list)))
+    (cl-loop for line in cavemacs-pretty--banner-lines
+             for idx from 0 do
+             ;; Rock starts at the run of spaces near col ~75; detect per-char
+             ;; by tracking whether we've passed the letters region.
+             (let ((rock-start
+                    ;; Heuristic: rock glyphs only appear at column >= 75.
+                    75))
+               (cl-loop for ch across line
+                        for col from 0 do
+                        (let* ((in-rock (>= col rock-start))
+                               (face (cavemacs-pretty--banner-face-for
+                                      ch col idx in-rock)))
+                          (push (if face
+                                    (propertize (string ch) 'face face)
+                                  (string ch))
+                                out))))
+             (push "\n" out))
+    (apply #'concat (nreverse out))))
+
 (defun cavemacs-pretty-indent-string (s prefix)
   "Indent every line in S with PREFIX (a propertized string)."
   (mapconcat (lambda (l) (concat prefix l))
