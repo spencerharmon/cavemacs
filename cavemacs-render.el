@@ -1182,8 +1182,9 @@ then under the project root."
     (cavemacs-render--render-tool-result (append result nil)))
    ;; List of content parts: [((type . "text") (text . "...")) ...]
    ((and (listp result)
-         (listp (car result))
-         (or (assq 'type (car result)) (assq 'text (car result))))
+         (consp (car result))
+         (consp (cdar result))
+         (or (assoc 'type (car result)) (assoc 'text (car result))))
     (mapconcat (lambda (part)
                  (or (alist-get 'text part)
                      (alist-get 'output part)
