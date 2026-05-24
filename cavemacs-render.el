@@ -366,7 +366,23 @@ after BODY runs so RET continues to submit the next prompt."
        (dolist (entry orig-window-points)
          (let ((w (car entry)) (wp (cdr entry)))
            (when (and (window-live-p w) (= wp orig-point))
-             (set-window-point w (point-max))))))))
+             (set-window-point w (point-max))))))
+     ;; Insertion above the prompt-marker pushes the input area
+     ;; (and any point parked in or near it) toward `point-max'.
+     ;; Emacs's auto-scroll only fires for the selected window's
+     ;; buffer point; other windows showing this buffer, or a
+     ;; redisplay deferred until after this filter returns, can
+     ;; leave the input area scrolled below `window-end' --
+     ;; visually "behind" the mode-line.  Force every live window
+     ;; showing this buffer to scroll its window-point back on
+     ;; screen.
+     (dolist (w (get-buffer-window-list (current-buffer) nil t))
+       (let ((wp (window-point w)))
+         (unless (pos-visible-in-window-p wp w t)
+           (with-selected-window w
+             (save-excursion
+               (goto-char wp)
+               (recenter -1))))))))
 
 (defun cavemacs-render--ensure-newline-before ()
   "Insert a newline before point unless we're at BOB or after a LF."
