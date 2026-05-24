@@ -425,15 +425,19 @@ Forces `completion-at-point' to run our slash-command CAPF even
 when other completion frontends (Copilot, Corfu, etc.) might
 otherwise win the TAB key."
   (interactive)
-  (if (and (boundp 'cavemacs-shell--input-start-marker)
-           cavemacs-shell--input-start-marker
-           (>= (point) (marker-position cavemacs-shell--input-start-marker)))
-      ;; Inside the input area: always offer slash-command completion
-      ;; via the standard CAPF mechanism.
-      (completion-at-point)
-    ;; Above the input area (read-only output region): fall back to
-    ;; regular tab behaviour.
-    (indent-for-tab-command)))
+  (cond
+   ;; Inside the input area: always offer slash-command completion
+   ;; via the standard CAPF mechanism.
+   ((and (boundp 'cavemacs-shell--input-start-marker)
+         cavemacs-shell--input-start-marker
+         (>= (point) (marker-position cavemacs-shell--input-start-marker)))
+    (completion-at-point))
+   ;; On a collapsible block header: toggle it. The buffer-local TAB
+   ;; binding otherwise shadows the text-property keymap.
+   ((get-text-property (point) 'cavemacs-collapse-id)
+    (cavemacs-render-toggle-at-point))
+   ;; Above the input area, no collapse target: regular indent.
+   (t (indent-for-tab-command)))))
 
 (defun cavemacs-shell-self-insert-slash ()
   "Insert / and trigger slash-command completion if at start of input."
@@ -452,6 +456,11 @@ otherwise win the TAB key."
   "Submit the input area if at end-of-buffer; otherwise insert a newline."
   (interactive)
   (cond
+   ;; On a collapsible block header above the input area: toggle it.
+   ((and cavemacs-shell--input-start-marker
+         (< (point) (marker-position cavemacs-shell--input-start-marker))
+         (get-text-property (point) 'cavemacs-collapse-id))
+    (cavemacs-render-toggle-at-point))
    ((or (not cavemacs-shell--input-start-marker)
         (< (point) (marker-position cavemacs-shell--input-start-marker)))
     (newline))
