@@ -114,6 +114,86 @@ so =C-S-a= still sets mark correctly.
 
 - =cavemacs-shell.el=
 
+* M13 — UI polish: assistant header scoping + full tool args on expand
+
+** Status
+
+Queued. Next milestone after M11 stabilises.
+
+** Goals
+
+1. *Scope the assistant header line* (=▌ ✦ Assistant · provider/model · HH:MM=)
+   so it precedes ONLY prose and thinking blocks (combined when
+   adjacent in the current turn, exactly as today). Tool-call
+   cards must render WITHOUT a preceding assistant header line.
+   Rationale: the header is meta about an LLM utterance; tool
+   calls are mechanical side-effects, not utterances, and the
+   repeated header creates visual noise in turns with many tools.
+2. *Rename =Assistant= → =Caveman=* in the header label. The product
+   identity is caveman; calling it "Assistant" is a leftover from
+   generic chat scaffolding.
+3. *Show full tool input on expand.* Today the collapsed tool-card
+   header shows a truncated single-line arg summary (e.g.
+   =edit · path=foo.el …=). When the card is expanded, the BODY
+   shows only the tool *result* — the full input (edit oldText /
+   newText, full bash command string, full file path, etc.) is
+   never visible. Expanding should reveal the full input ABOVE the
+   result, with the collapsed view still showing the same
+   truncated summary in the header line (the header is the
+   identity; the body is the detail).
+
+** Implementation sketch
+
+- =cavemacs-render--on-message-start= currently emits the
+  assistant header unconditionally at message start. Defer the
+  header emit until the first prose / thinking insertion within
+  the message; suppress it for messages whose only content was
+  tool calls. Track "header already emitted for this message"
+  via a buffer-local plist keyed by message id.
+- Label change: single string constant swap inside the header
+  formatter (search for "Assistant" in =cavemacs-render.el= /
+  =cavemacs-pretty.el=).
+- Tool full-input on expand: in =cavemacs-render--on-tool-start=,
+  after writing the header line, insert a pretty-printed full-arg
+  block (each key on its own line, multi-line values indented
+  under their key) with the same =│ = rule prefix used by the
+  result body. Register this region as part of the collapsible
+  body so it's hidden in the default collapsed state and revealed
+  on TAB/RET. =--on-tool-end= then appends the result block below
+  it (separator rule between input and output for readability).
+
+** Tests to add
+
+- =cavemacs-render/tool-call-has-no-assistant-header=:
+  message_start (role=assistant) → tool_execution_start →
+  tool_execution_end → message_end (no text content). Assert the
+  buffer does NOT contain the header glyph / "Caveman" label.
+- =cavemacs-render/assistant-header-emitted-once-per-prose-message=:
+  message with mixed thinking + prose still produces exactly one
+  header line.
+- =cavemacs-render/tool-expand-shows-full-args=: tool with a
+  multi-line =command= arg renders the full command inside the
+  expanded body (use buffer-substring with the collapse overlay
+  removed). Truncated summary still appears in the header.
+- =cavemacs-render/header-label-is-caveman=: assertion on the
+  literal label string.
+
+** Related files
+
+- =cavemacs-render.el= (message_start header gating; tool-start
+  full-arg block insertion; collapse region extension)
+- =cavemacs-pretty.el= (header label constant; possibly the
+  glyph)
+- =tests/cavemacs-render-test.el=
+
+** Out of scope
+
+- Restructuring tool cards to not use a box at all.
+- Changing the truncated summary format itself.
+- Per-tool custom expanded layouts (edit-diff styling, bash
+  syntax highlighting on the command line, etc.) — nice-to-have
+  follow-ups.
+
 * M12 — Worker dispatch (deferred)
 
 ** Goal
