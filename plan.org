@@ -3,7 +3,7 @@
 #+STARTUP: overview
 #+OPTIONS: toc:2 num:nil
 
-* Status: v0.0.12 in-progress on collapsible blocks; v0.1.0 SHIPPED; R1/R2/R3 fixed; M10/M11 in post-v0.1.0 patches
+* Status: v0.0.13 in-progress on collapsible blocks; v0.1.0 SHIPPED; R1/R2/R3 fixed; M10/M11 in post-v0.1.0 patches
 
 All milestones M0–M8 complete plus M10 (slash command dispatch +
 in-prompt autocomplete).  M9 stretch deferred.  See =CHANGELOG.md=.
@@ -211,6 +211,8 @@ tests passed throughout but didn't exercise the relevant shape.
   summary contained a newline. Emacs treated it as a virtual
   visual line; C-p past the close-box rule got stuck. Fix: drop
   the summary string.
+- R-M11.10 (=930f3d4=): same root cause as R-M11.9 but for thinking
+  blocks (had its own summary string). Dropped.
 
 Lessons:
 - =rear-advance= on long-lived overlays is almost always wrong.
