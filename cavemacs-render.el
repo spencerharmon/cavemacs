@@ -580,6 +580,9 @@ M-x cavemacs-shell-restart to start a new process.\n"
         (pcase role
           ("user"      (cavemacs-render--render-user-start    msg start key))
           ("assistant" (cavemacs-render--render-asst-start    msg start key))
+          ;; Tool-result messages are already displayed inside the
+          ;; tool card; skip the redundant raw message rendering.
+          ((or "tool" "toolResult" "tool_result") nil)
           (_
            (insert (propertize (format "[%s]" role)
                                'face 'cavemacs-pretty-meta-face)
