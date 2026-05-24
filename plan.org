@@ -3,7 +3,7 @@
 #+STARTUP: overview
 #+OPTIONS: toc:2 num:nil
 
-* Status: v0.0.13 in-progress on collapsible blocks; v0.1.0 SHIPPED; R1/R2/R3 fixed; M10/M11 in post-v0.1.0 patches
+* Status: v0.0.14 — tool-card copy strips box rules; M11 collapsible-blocks bug-chain stable
 
 All milestones M0–M8 complete plus M10 (slash command dispatch +
 in-prompt autocomplete).  M9 stretch deferred.  See =CHANGELOG.md=.
@@ -728,19 +728,20 @@ flagged inline above.
 
 * Known issues
 
-- Kill/yank on tool-card body lines includes the leading box-drawing
-  prefix (=│ =) and the surrounding =╭─...─=  / =╰─...─= rules. Copied
-  shell commands therefore paste with the rule glyph attached and
-  have to be hand-trimmed. Options: (a) put the prefix on a
-  =before-string= overlay (not part of buffer text); (b) use a
-  =display= property to render the box without it being in the
-  selectable buffer text; (c) drop the box entirely for tool bodies.
 - Resuming an existing session (session browser / -continue) does not
   restore the model in the header line. The pretty header keeps the
   default/last value until the next assistant message republishes
   meta. Likely fix: on session resume, call =get_state= (or similar)
   and push =:provider= / =:model= into =cavemacs-pretty--header-state=
   before the first turn.
+
+** Fixed
+
+- v0.0.14: Kill/yank on tool-card body lines used to include the
+  leading =│ = box prefix and the =╭=/=╰= surrounding rules. Fixed by
+  tagging every rule glyph with a =cavemacs-rule= text property and
+  installing a buffer-local =filter-buffer-substring-function= in
+  =cavemacs-shell-mode= that drops tagged chars from copied text.
 
 * Timeline (rough, solo developer, part-time)
 

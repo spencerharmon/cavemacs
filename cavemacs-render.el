@@ -915,18 +915,18 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
            (cavemacs-pretty-glyph 'box-tl)
            (cavemacs-pretty-glyph 'box-h)
            " ")
-          'face face))
+          'face face 'cavemacs-rule t))
         (insert (propertize (format "%s %s" glyph name) 'face face))
         (let ((summary (cavemacs-render--tool-arg-summary args)))
           (when (and summary (not (string-empty-p summary)))
             (insert (propertize " · " 'face 'cavemacs-pretty-meta-face))
             (insert (propertize summary 'face 'cavemacs-tool-args-face))))
-        (insert " ")
+        (insert (propertize " " 'cavemacs-rule t))
         (insert (propertize
                  (make-string 4 (string-to-char
                                  (cavemacs-pretty-glyph 'box-h)))
-                 'face face))
-        (insert "\n")
+                 'face face 'cavemacs-rule t))
+        (insert (propertize "\n" 'cavemacs-rule t))
         (let ((header-end (point))
               (ov (make-overlay start (point) nil nil t)))
           (overlay-put ov 'cavemacs-tool-id tool-id)
@@ -960,7 +960,8 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
             (let* ((text (cavemacs-render--render-tool-result result))
                    (body-prefix (propertize
                                  (concat (cavemacs-pretty-glyph 'box-v) " ")
-                                 'face rule-face))
+                                 'face rule-face
+                                 'cavemacs-rule t))
                    (body (mapconcat (lambda (l) (concat body-prefix l))
                                     (split-string (string-trim-right text)
                                                   "\n" nil)
@@ -988,8 +989,9 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                                (or duration-str "")
                                (make-string 4 (string-to-char
                                                (cavemacs-pretty-glyph 'box-h))))))
-                  (insert (propertize close 'face rule-face))
-                  (insert "\n"))
+                  (insert (propertize close 'face rule-face
+                                      'cavemacs-rule t))
+                  (insert (propertize "\n" 'cavemacs-rule t)))
                 ;; Register the body region (body-beg .. body-end) as
                 ;; the collapsible region.  Header is the line we wrote
                 ;; in --on-tool-start.

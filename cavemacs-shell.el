@@ -117,6 +117,8 @@ Takes one argument: the project name."
               scroll-conservatively 101
               scroll-margin 0)
   (setq-local mode-line-process '(:eval (cavemacs-shell--mode-line)))
+  (setq-local filter-buffer-substring-function
+              #'cavemacs-shell--filter-buffer-substring)
   ;; Slash-command completion.  Loaded lazily; if cavemacs-commands is
   ;; already on the load path (it is, since cavemacs.el requires it),
   ;; this is a no-op.
@@ -146,6 +148,21 @@ Adds a buffer-local override so even modes that bind TAB via
     (setq-local minor-mode-overriding-map-alist
                 (cons (cons 'cavemacs-shell-mode override-map)
                       minor-mode-overriding-map-alist))))
+
+(defun cavemacs-shell--filter-buffer-substring (beg end delete)
+  "Strip tool-card box rule glyphs (chars tagged `cavemacs-rule') from copied text.
+DELETE follows `filter-buffer-substring' contract."
+  (let ((src (current-buffer))
+        (result nil)
+        (p beg))
+    (while (< p end)
+      (let ((next (or (next-single-property-change p 'cavemacs-rule src end)
+                      end)))
+        (unless (get-text-property p 'cavemacs-rule src)
+          (push (buffer-substring p next) result))
+        (setq p next)))
+    (when delete (delete-region beg end))
+    (apply #'concat (nreverse result))))
 
 (defun cavemacs-shell--mode-line ()
   "Modeline contribution for the cavemacs shell."

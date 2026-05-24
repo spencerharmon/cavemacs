@@ -102,6 +102,31 @@
             (should (string-match-p "file2" text))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-render/tool-block-copy-strips-rule-glyphs ()
+  "Kill/yank on tool-card body must not pull `│ ' or the box rules."
+  (require 'cavemacs-shell)
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "tool_execution_start")
+             (toolCallId . "tc-9")
+             (toolName . "bash")
+             (args . ((command . "ls")))))
+          (cavemacs-render-event
+           '((type . "tool_execution_end")
+             (toolCallId . "tc-9")
+             (toolName . "bash")
+             (isError . :json-false)
+             (result . ((output . "file1\nfile2")))))
+          (let* ((copied (filter-buffer-substring (point-min) (point-max))))
+            (should-not (string-match-p "│" copied))
+            (should-not (string-match-p "╭" copied))
+            (should-not (string-match-p "╰" copied))
+            (should (string-match-p "file1" copied))
+            (should (string-match-p "file2" copied))))
+      (kill-buffer buf))))
+
 (ert-deftest cavemacs-render/handles-unknown-event-types ()
   (let ((buf (cavemacs-render-test--fresh-buffer)))
     (unwind-protect
