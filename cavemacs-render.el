@@ -939,7 +939,7 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
           (overlay-put ov 'cavemacs-tool-status 'running)
           (overlay-put ov 'cavemacs-tool-face face)
           (overlay-put ov 'cavemacs-header-beg (copy-marker start nil))
-          (overlay-put ov 'cavemacs-header-end (copy-marker header-end t))
+          (overlay-put ov 'cavemacs-header-end (copy-marker header-end nil))
           (puthash tool-id ov cavemacs-render--tool-overlays))
         (cavemacs-render--apply-fringe start (1+ start) 'tool)))))
 
