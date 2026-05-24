@@ -18,6 +18,25 @@ workflows and pitfalls that have bitten us during development.
    `(condition-case ... (eval '(transient-define-prefix ...) t) ...)`
    so a transient version mismatch can't break package loading.
 
+## Version bump on every reload-required push (MANDATORY)
+
+Bump `cavemacs-version` (PATCH) in `cavemacs.el` on every push that
+requires the user to reload Emacs to test. The version is shown in
+the pretty header-line as `cavemacs X.Y.Z` so the user can visually
+confirm the new code is loaded.
+
+Workflow:
+1. Make the change.
+2. Bump PATCH in the `(defconst cavemacs-version "X.Y.Z" ...)` form
+   in `cavemacs.el`.
+3. Commit + push.
+4. `cd ~/.emacs.d/straight/repos/cavemacs && git pull --ff-only`.
+5. Tell the user to restart and confirm the new version in the
+   header-line.
+
+Doc-only or test-only changes that don't affect runtime don't need
+a bump.
+
 ## Refresh-before-test workflow (MANDATORY)
 
 `straight.el` is the package manager users install cavemacs with.

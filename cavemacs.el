@@ -28,7 +28,7 @@
 
 ;;; Code:
 
-(defconst cavemacs-version "0.1.1"
+(defconst cavemacs-version "0.1.2"
   "Cavemacs version. Bumped manually when tagging a release.")
 
 (require 'cavemacs-config)
