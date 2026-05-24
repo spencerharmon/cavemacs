@@ -81,8 +81,6 @@ still work alongside this flag."
   :type 'boolean
   :group 'cavemacs)
 
-(defconst cavemacs-version "0.1.0")
-
 (defun cavemacs--binary ()
   "Resolve the caveman executable, honouring `cavemacs-binary'."
   (or (and cavemacs-binary
