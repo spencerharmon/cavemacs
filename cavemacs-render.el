@@ -1014,7 +1014,16 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
           (overlay-put ov 'cavemacs-tool-face face)
           (overlay-put ov 'cavemacs-header-beg (copy-marker start nil))
           (overlay-put ov 'cavemacs-header-end (copy-marker header-end nil))
-          (puthash tool-id ov cavemacs-render--tool-overlays))
+          (puthash tool-id ov cavemacs-render--tool-overlays)
+          ;; Register a placeholder collapsible block now (empty body)
+          ;; so the header is toggle-able while the tool is still
+          ;; running.  --on-tool-end re-registers with the real body;
+          ;; the user's collapse choice persists via the id hash.
+          (when tool-id
+            (cavemacs-render--register-block
+             (format "tool:%s" tool-id)
+             start header-end
+             header-end header-end nil)))
         (cavemacs-render--apply-fringe start (1+ start) 'tool)))))
 
 (defun cavemacs-render--on-tool-update (_event) nil)
