@@ -661,6 +661,13 @@ flagged inline above.
 
 * Known issues
 
+- Kill/yank on tool-card body lines includes the leading box-drawing
+  prefix (=│ =) and the surrounding =╭─...─=  / =╰─...─= rules. Copied
+  shell commands therefore paste with the rule glyph attached and
+  have to be hand-trimmed. Options: (a) put the prefix on a
+  =before-string= overlay (not part of buffer text); (b) use a
+  =display= property to render the box without it being in the
+  selectable buffer text; (c) drop the box entirely for tool bodies.
 - Resuming an existing session (session browser / -continue) does not
   restore the model in the header line. The pretty header keeps the
   default/last value until the next assistant message republishes
