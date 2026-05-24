@@ -46,10 +46,20 @@ For every code change the user needs to reload to test, do ALL of:
    and any non-obvious mechanics).
 6. `git push` to `origin/main`.
 7. Refresh the user's straight clone so they're not running stale
-   code:
+   code, AND rebuild so the .elc files match the new source:
    ```bash
    cd ~/.emacs.d/straight/repos/cavemacs && git pull --ff-only
+   emacsclient -e '(straight-rebuild-package "cavemacs")'
    ```
+   (emacsclient runs inside the user's live Emacs where straight is
+   already bootstrapped; a `emacs --batch` invocation can't `require
+   'straight` without re-bootstrapping.)
+
+   straight only rebuilds when source mtime is newer than build
+   artifacts; `git pull` sets the mtime, but running an explicit
+   rebuild guarantees the .elc files are current before the user
+   restarts. Without this step the user can restart into stale
+   byte-compiled code even though the .el source is fresh.
 8. Verify parity: the SHA from `git log --oneline -1` in the user's
    straight clone must match `origin/main`.
 9. Tell the user: "Restart Emacs. Header-line should read
