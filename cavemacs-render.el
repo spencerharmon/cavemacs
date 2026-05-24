@@ -720,15 +720,7 @@ M-x cavemacs-shell-restart to start a new process.\n"
                    (header-end (point))
                    (body-beg (point))
                    (body-content
-                    (cavemacs-render--indent-body thinking face))
-                   (summary
-                    (propertize
-                     (concat rule-prefix
-                             (propertize
-                              (format "… %d hidden line%s\n"
-                                      nlines (if (= nlines 1) "" "s"))
-                              'face 'cavemacs-meta-face))
-                     'face 'cavemacs-thinking-face)))
+                    (cavemacs-render--indent-body thinking face)))
               (insert (propertize body-content
                                   'face 'cavemacs-thinking-face))
               (insert "\n")
@@ -738,7 +730,7 @@ M-x cavemacs-shell-restart to start a new process.\n"
                 (when msg-key
                   (cavemacs-render--register-block
                    (format "thinking:%s" msg-key)
-                   header-beg header-end body-beg body-end summary)))
+                   header-beg header-end body-beg body-end nil)))
               (insert "\n")))
           (let ((text-start (point)))
             (insert (cavemacs-render--indent-body text face))
