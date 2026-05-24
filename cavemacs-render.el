@@ -1001,27 +1001,14 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                 ;; Register the body region (body-beg .. body-end) as
                 ;; the collapsible region.  Header is the line we wrote
                 ;; in --on-tool-start.
-                (when (and tool-id
-                           (overlay-get ov 'cavemacs-header-beg)
-                           (overlay-get ov 'cavemacs-header-end))
-                  (let* ((nlines (length (split-string
-                                          (buffer-substring-no-properties
-                                           body-beg body-end)
-                                          "\n" t)))
-                         (summary
-                          (propertize
-                           (concat body-prefix
-                                   (propertize
-                                    (format "… %d hidden line%s\n"
-                                            nlines
-                                            (if (= nlines 1) "" "s"))
-                                    'face 'cavemacs-pretty-meta-face))
-                           'face 'cavemacs-pretty-meta-face)))
+                  (when (and tool-id
+                             (overlay-get ov 'cavemacs-header-beg)
+                             (overlay-get ov 'cavemacs-header-end))
                     (cavemacs-render--register-block
                      (format "tool:%s" tool-id)
                      (marker-position (overlay-get ov 'cavemacs-header-beg))
                      (marker-position (overlay-get ov 'cavemacs-header-end))
-                     body-beg body-end summary)))
+                     body-beg body-end nil))
                 (move-overlay ov (overlay-start ov) (point))
                 (overlay-put ov 'cavemacs-tool-status
                              (if is-error 'error 'ok))))))))))
