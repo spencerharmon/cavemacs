@@ -378,7 +378,7 @@ after BODY runs so RET continues to submit the next prompt."
      ;; screen.
      (dolist (w (get-buffer-window-list (current-buffer) nil t))
        (let ((wp (window-point w)))
-         (unless (pos-visible-in-window-p wp w)
+         (when (= wp (point-max))
            (with-selected-window w
              (save-excursion
                (goto-char wp)
