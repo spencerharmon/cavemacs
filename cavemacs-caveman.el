@@ -551,14 +551,16 @@ NON-INTERACTIVE non-nil to skip the prompt."
   :group 'cavemacs-caveman)
 
 (defun cavemacs-caveman--header-segment ()
-  "Return the propertized caveman segment for the pretty header, or empty."
-  (if-let* ((l (cavemacs-pretty-state-get :caveman-level)))
-      (concat "  "
-              (propertize (format "⛏ caveman:%s" l)
-                          'face 'cavemacs-caveman-header-face
-                          'mouse-face 'highlight
-                          'help-echo "mouse-1: cycle caveman level"))
-    ""))
+  "Return the propertized caveman segment for the pretty header.
+Always shows the current level (or \"off\") so users can see at a
+glance whether caveman is active."
+  (let* ((l (cavemacs-pretty-state-get :caveman-level))
+         (label (or l "off")))
+    (concat "  "
+            (propertize (format "⛏ caveman:%s" label)
+                        'face 'cavemacs-caveman-header-face
+                        'mouse-face 'highlight
+                        'help-echo "mouse-1: cycle caveman level"))))
 
 ;; Splice the caveman segment into the pretty header by advising the
 ;; formatter.  We add the segment between the model and the cost,

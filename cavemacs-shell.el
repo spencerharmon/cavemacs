@@ -343,6 +343,10 @@ Layout (top to bottom):
                (model (alist-get 'model data))
                (provider (and model (alist-get 'provider model)))
                (mid (and model (alist-get 'id model))))
+          (when (and provider (stringp provider) (not (string-empty-p provider)))
+            (cavemacs-pretty-state-put :provider provider))
+          (when (and mid (stringp mid) (not (string-empty-p mid)))
+            (cavemacs-pretty-state-put :model mid))
           (cavemacs-shell--set-mode-info
            (if (and provider mid)
                (format "idle · %s/%s" provider mid)

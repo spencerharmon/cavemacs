@@ -148,11 +148,13 @@ tests that care about envelopes can bind the macro to a variable."
                 (cavemacs-caveman--header-segment))))
       (should (string-match-p "caveman:full" seg)))))
 
-(ert-deftest cavemacs-caveman/header-segment-empty-when-off ()
+(ert-deftest cavemacs-caveman/header-segment-shows-off-when-disabled ()
   (with-temp-buffer
     (cavemacs-pretty-mode 1)
     (cavemacs-pretty-state-put :caveman-level nil)
-    (should (string-empty-p (cavemacs-caveman--header-segment)))))
+    (let ((seg (substring-no-properties
+                (cavemacs-caveman--header-segment))))
+      (should (string-match-p "caveman:off" seg)))))
 
 (ert-deftest cavemacs-caveman/pretty-header-includes-caveman-pill ()
   (with-temp-buffer
