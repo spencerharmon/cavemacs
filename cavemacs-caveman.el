@@ -90,7 +90,9 @@ cavemacs release."
 
 (defcustom cavemacs-caveman-skill-paths
   '(("project" . ".cave/skills/caveman/SKILL.md")
-    ("global"  . "~/.cave/agent/skills/caveman/SKILL.md"))
+    ("project-plugin" . ".cave/skills/caveman/plugins/caveman/skills/caveman/SKILL.md")
+    ("global"  . "~/.cave/agent/skills/caveman/SKILL.md")
+    ("global-plugin" . "~/.cave/agent/skills/caveman/plugins/caveman/skills/caveman/SKILL.md"))
   "Where to look for caveman's SKILL.md, in priority order.
 
 Project-relative entries are resolved against the current
