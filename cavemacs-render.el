@@ -821,7 +821,8 @@ messages render with no header at all."
               (let ((rendered
                      (if (and (not is-error)
                               cavemacs-render-fontify-markdown
-                              (featurep 'markdown-mode))
+                              (or (featurep 'markdown-mode)
+                                  (require 'markdown-mode nil t)))
                          (cavemacs-render--fontify-markdown-string text)
                        text)))
                 (insert (cavemacs-render--indent-body rendered face)))
@@ -832,7 +833,8 @@ messages render with no header at all."
               (put-text-property text-start (point) 'face
                                  'cavemacs-error-face))
              ((and cavemacs-render-fontify-markdown
-                       (featurep 'markdown-mode))
+                   (or (featurep 'markdown-mode)
+                       (require 'markdown-mode nil t)))
               (cavemacs-render--decorate-code-blocks text-start (point))
               (cavemacs-render--apply-variable-pitch text-start (point))))
             (move-overlay ov (overlay-start ov) (point))))))))
