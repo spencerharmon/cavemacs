@@ -526,6 +526,137 @@ boundaries quickly."
                (split-string (or text "") "\n" nil)
                "\n")))
 
+(defcustom cavemacs-render-align-tables t
+  "When non-nil, pad pipe-table cells with spaces so columns line up.
+
+Font-agnostic alternative to `valign-mode': we rewrite the table
+source itself.  Works even though each line is prefixed with the
+turn rule, because we only insert spaces."
+  :type 'boolean
+  :group 'cavemacs)
+
+(defconst cavemacs-render--table-line-re
+  "^[ \t]*|.*|[ \t]*$"
+  "Regexp matching a markdown pipe-table line.")
+
+(defun cavemacs-render--table-sep-cell-p (cell)
+  "Return non-nil if CELL is a `---' / `:--:' separator-row cell."
+  (string-match-p "\\`[ \t]*:?-+:?[ \t]*\\'" cell))
+
+(defun cavemacs-render--table-split-row (line)
+  "Split table LINE into trimmed cells.  Drop surrounding empty cells
+that come from leading/trailing `|'."
+  (let* ((trimmed (string-trim line))
+         (parts (split-string trimmed "|")))
+    ;; Leading `|' yields empty first element; trailing `|' yields
+    ;; empty last element.  Drop only those edge empties.
+    (when (and parts (string-empty-p (car parts)))
+      (setq parts (cdr parts)))
+    (when (and parts (string-empty-p (car (last parts))))
+      (setq parts (butlast parts)))
+    (mapcar #'string-trim parts)))
+
+(defun cavemacs-render--table-sep-row-p (cells)
+  "Non-nil if CELLS are all separator cells (and at least one cell)."
+  (and cells (cl-every #'cavemacs-render--table-sep-cell-p cells)))
+
+(defun cavemacs-render--table-cell-align (cell)
+  "Parse a separator CELL, return `left', `right', `center', or `left'."
+  (let* ((s (string-trim cell))
+         (l (and (> (length s) 0) (eq (aref s 0) ?:)))
+         (r (and (> (length s) 0) (eq (aref s (1- (length s))) ?:))))
+    (cond ((and l r) 'center)
+          (r 'right)
+          (t 'left))))
+
+(defun cavemacs-render--pad-cell (cell width align)
+  "Pad CELL to WIDTH using ALIGN (`left'/`right'/`center')."
+  (let* ((len (string-width cell))
+         (pad (max 0 (- width len))))
+    (pcase align
+      ('right  (concat (make-string pad ?\s) cell))
+      ('center (let* ((l (/ pad 2)) (r (- pad l)))
+                 (concat (make-string l ?\s) cell (make-string r ?\s))))
+      (_       (concat cell (make-string pad ?\s))))))
+
+(defun cavemacs-render--format-table-block (rows)
+  "Format ROWS (list of (raw-line . cells)) into aligned table lines.
+
+Returns list of formatted strings, one per input row."
+  (let* ((cell-rows (mapcar #'cdr rows))
+         (ncols (apply #'max 0 (mapcar #'length cell-rows)))
+         (norm (mapcar (lambda (r)
+                         (append r (make-list (- ncols (length r)) "")))
+                       cell-rows))
+         (sep-idx (cl-position-if #'cavemacs-render--table-sep-row-p norm))
+         (sep-row (and sep-idx (nth sep-idx norm)))
+         (aligns (if sep-row
+                     (mapcar #'cavemacs-render--table-cell-align sep-row)
+                   (make-list ncols 'left)))
+         (widths
+          (cl-loop for c from 0 below ncols collect
+                   (cl-loop for row in norm
+                            for i from 0
+                            unless (eql i sep-idx)
+                            maximize (string-width (nth c row))))))
+    (cl-loop for row in norm
+             for i from 0
+             collect
+             (if (eql i sep-idx)
+                 (concat
+                  "|"
+                  (mapconcat
+                   (lambda (pair)
+                     (let* ((w (car pair))
+                            (a (cdr pair))
+                            (mid (max 1 w))
+                            (lc (if (memq a '(left center)) ":" "-"))
+                            (rc (if (memq a '(right center)) ":" "-")))
+                       (concat lc (make-string mid ?-) rc)))
+                   (cl-mapcar #'cons widths aligns) "|")
+                  "|")
+               (concat
+                "| "
+                (mapconcat #'identity
+                           (cl-loop for c from 0 below ncols collect
+                                    (cavemacs-render--pad-cell
+                                     (nth c row) (nth c widths) (nth c aligns)))
+                           " | ")
+                " |")))))
+
+(defun cavemacs-render--align-tables (text)
+  "Return TEXT with markdown pipe tables padded to aligned columns.
+
+No-op when `cavemacs-render-align-tables' is nil or no tables match.
+Lines outside table blocks are preserved verbatim."
+  (if (or (not cavemacs-render-align-tables)
+          (not (string-match-p cavemacs-render--table-line-re text)))
+      text
+    (let ((lines (split-string text "\n" nil))
+          (out '())
+          (block '()))
+      (cl-labels
+          ((flush ()
+             (when block
+               (let* ((rows (nreverse block))
+                      (parsed
+                       (mapcar (lambda (l)
+                                 (cons l (cavemacs-render--table-split-row l)))
+                               rows)))
+                 (if (>= (length parsed) 2)
+                     (dolist (s (cavemacs-render--format-table-block parsed))
+                       (push s out))
+                   ;; Single-line "table" — leave as-is.
+                   (dolist (l rows) (push l out))))
+               (setq block nil))))
+        (dolist (l lines)
+          (if (string-match-p cavemacs-render--table-line-re l)
+              (push l block)
+            (flush)
+            (push l out)))
+        (flush))
+      (mapconcat #'identity (nreverse out) "\n"))))
+
 (defun cavemacs-render--apply-fringe (beg end kind)
   "Tag the line containing BEG..END with a fringe indicator of KIND."
   (when (and (boundp 'cavemacs-pretty-mode) cavemacs-pretty-mode
@@ -921,14 +1052,18 @@ messages.  A final non-streaming repaint runs on `text_end' /
                    header-beg header-end body-beg body-end nil)))))
           (let ((text-start (point)))
             (unless (string-empty-p text)
-              (let ((rendered
-                     (if (and (not is-error)
-                              (not streaming)
-                              cavemacs-render-fontify-markdown
-                              (or (featurep 'markdown-mode)
-                                  (require 'markdown-mode nil t)))
-                         (cavemacs-render--fontify-markdown-string text)
-                       text)))
+              (let* ((pre (if (and (not is-error)
+                                   (not streaming))
+                              (cavemacs-render--align-tables text)
+                            text))
+                     (rendered
+                      (if (and (not is-error)
+                               (not streaming)
+                               cavemacs-render-fontify-markdown
+                               (or (featurep 'markdown-mode)
+                                   (require 'markdown-mode nil t)))
+                          (cavemacs-render--fontify-markdown-string pre)
+                        pre)))
                 (insert (cavemacs-render--indent-body rendered face)))
               (unless (eq (char-before) ?\n) (insert "\n"))
               (insert "\n"))

@@ -64,6 +64,23 @@
      (messages . nil)))
   "Synthetic event sequence equivalent to a real one-word reply.")
 
+(ert-deftest cavemacs-render/align-tables-pads-columns ()
+  "`cavemacs-render--align-tables' pads cells so columns line up."
+  (let* ((in "| a | bb | ccc |\n| --- | :---: | ---: |\n| 1 | 2 | 3 |")
+         (out (cavemacs-render--align-tables in))
+         (lines (split-string out "\n")))
+    (should (= 3 (length lines)))
+    ;; Header and body rows have identical visual width.
+    (should (= (length (nth 0 lines)) (length (nth 2 lines))))
+    ;; Separator preserves alignment markers.
+    (should (string-match-p ":-+:" (nth 1 lines)))   ;; center col
+    (should (string-match-p "-+:|" (nth 1 lines))))) ;; right col
+
+(ert-deftest cavemacs-render/align-tables-noop-without-table ()
+  "Plain text passes through unchanged."
+  (let ((s "just prose\nno tables here"))
+    (should (equal s (cavemacs-render--align-tables s)))))
+
 (ert-deftest cavemacs-render/replay-renders-history ()
   "`cavemacs-render-replay-messages' renders user/assistant/tool history."
   (let ((buf (cavemacs-render-test--fresh-buffer)))
