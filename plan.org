@@ -16,6 +16,112 @@ The notes below preserve the original plan for historical reference.
 Material corrections discovered during execution are flagged inline
 with =[CORRECTED]= markers.
 
+* Performance: long-conversation CPU-bound rendering
+
+=cavemacs= becomes CPU-bound when the conversation grows long
+and/or the current assistant message gets large.  Root cause is
+that =cavemacs-render--repaint-assistant= rebuilds and
+re-fontifies the *entire current assistant message* on every
+streaming =text_delta= event:
+
+- =(concat cur delta)= on overlay prop → O(N) string copy per
+  delta → O(N²) per message.
+- =delete-region= then re-insert all text.
+- =cavemacs-render--fontify-markdown-string= spins up a
+  =with-temp-buffer=, runs =markdown-mode= + =font-lock-ensure=
+  over the *full accumulated text* every delta. Dominant cost.
+- =cavemacs-render--decorate-code-blocks= rescans the body and
+  makes fresh overlays each repaint.
+- =cavemacs-render--apply-variable-pitch= creates a new overlay
+  each repaint.
+
+Secondary scaling: per-message + per-tool + per-collapse-body +
+per-code-block overlays accumulate unbounded across turns.  Emacs
+redisplay walks overlay lists per window update, so very long
+sessions slow down even when streaming is idle.
+
+** Improvement backlog (tiers by ROI)
+
+*** Tier 1 — ship first (biggest win / smallest diff)
+
+- [ ] #1  Defer markdown fontify until =text_end= / =message_end=.
+      Insert raw text during streaming; fontify once when the
+      message is complete.
+- [ ] #3  Coalesce streaming deltas via a short idle timer
+      (~30 ms).  Update overlay text immediately, repaint once
+      per idle tick instead of per delta.  =text_end= flushes
+      synchronously.
+- [ ] #11 Bind =inhibit-modification-hooks t= and
+      =buffer-undo-list t= around every render insert.  Stops
+      foreign after-change hooks and undo-list growth.
+- [ ] #12 Raise =gc-cons-threshold= during a streaming turn,
+      restore on =turn_end= / =agent_end=.  Reduces mid-stream
+      GC pauses from string churn.
+- [ ] #25 Never re-fontify finalized prior messages.  Once a
+      message has hit =message_end=, no later event touches its
+      overlay body.
+- [ ] #26 Profile before further tuning: =M-x profiler-start=
+      cpu, replay a long stream, =profiler-report=.  Confirm
+      hotspot is still markdown fontify and not something
+      surprising (=display-line-numbers-mode=, =hl-line=,
+      =lsp-mode=, etc.).
+
+*** Tier 2 — follow-up
+
+- [ ] #2  Incremental append instead of full-body repaint:
+      track last-inserted length on the overlay, insert only the
+      new suffix on each delta.
+- [ ] #4 / #17  Convert finalized turns from overlays to plain
+      text properties.  Text-properties are tree-indexed; Emacs
+      redisplay's overlay scan is O(overlays × windows ×
+      redisplay-events).
+- [ ] #5  Reuse a single =--apply-variable-pitch= overlay per
+      message; extend its end-marker on append.
+- [ ] #6  Use =jit-lock= deferred fontify for visible region
+      only, instead of synchronous =font-lock-ensure=.
+- [ ] #7  Skip fontify entirely for off-screen messages: bail if
+      the overlay does not intersect =(window-start)= ..
+      =(window-end)=.
+- [ ] #8  Replace =with-temp-buffer markdown-mode= round-trip
+      with a hand-rolled regex pass for bold / italic / inline
+      code / fenced code.  10–50× faster.
+- [ ] #9  =inhibit-point-motion-hooks= around repaint inserts.
+- [ ] #13 Use =(insert delta)= against the overlay's end rather
+      than building =(concat cur delta)= in the overlay prop.
+- [ ] #14 Reuse a single hidden scratch buffer for fontify
+      instead of =with-temp-buffer= (which allocates + tears
+      down each call).
+- [ ] #15 Cap decoration overlays per message.
+- [ ] #16 Markers with =rear-advance= on a single per-message
+      overlay; insert appends and the overlay end auto-extends.
+- [ ] #18 Avoid =json-parse-string= over huge tool outputs;
+      stream-parse or hard-cap the parsed slice.  Confirm
+      collapsed bodies skip parse too.
+- [ ] #19 Audit any remaining =split-string= on large payloads.
+- [ ] #20 Coalesce multiple events received in a single filter
+      chunk: repaint once after the whole chunk drains.
+- [ ] #21 Cache the input-area boundary marker for RET; avoid
+      buffer scans on each keystroke.
+- [ ] #22 Guard =recenter -1= behind a "was at bottom" check
+      (don't snap-back when the user has scrolled up to read
+      history).
+- [ ] Disable =display-line-numbers-mode= /
+      =global-display-line-numbers-mode= in
+      =cavemacs-shell-mode=: line-number redisplay is
+      O(buffer-size) per refresh.
+
+*** Tier 3 — architectural
+
+- [ ] #23 Virtualize old turns: collapse to a one-line summary
+      overlay; expand on click.
+- [ ] #24 Hard cap visible history: keep last N turns rendered,
+      replace earlier ones with a "[… K earlier turns]"
+      placeholder; re-render on demand.
+
+** v0.0.32 ships Tier 1 (#1 + #3 + #11 + #12 + #25 + the
+   line-numbers guard from Tier 2 because it's a one-liner with
+   a known-large impact).
+
 * Postmortem: R3 (silent upstream errors)
 
 Symptom: switching to `claude-opus-4.7` and prompting produced an

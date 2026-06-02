@@ -111,11 +111,18 @@ Takes one argument: the project name."
               word-wrap t
               indent-tabs-mode nil
               inhibit-field-text-motion t
+              ;; Line-number redisplay is O(buffer-size) per refresh.
+              ;; Disable locally; users can re-enable if they really
+              ;; want, but the default chat buffer doesn't need it and
+              ;; it's a major drag on long conversations.
+              display-line-numbers nil
               ;; Chat-style scroll: keep point pinned to the bottom of
               ;; the window so the input area is always visible.  These
               ;; are the standard comint settings.
               scroll-conservatively 101
               scroll-margin 0)
+  (when (fboundp 'display-line-numbers-mode)
+    (display-line-numbers-mode -1))
   (setq-local mode-line-process '(:eval (cavemacs-shell--mode-line)))
   (setq-local filter-buffer-substring-function
               #'cavemacs-shell--filter-buffer-substring)

@@ -150,9 +150,94 @@ each new session starts at the defaults from
 Used by `cavemacs-render-toggle-block' so the toggle keymap on the
 header can find its body without walking the buffer.")
 
+;; --- Streaming-repaint coalescing & GC tuning -------------------------------
+
+(defcustom cavemacs-render-repaint-idle 0.03
+  "Idle-time seconds to coalesce streaming assistant repaints.
+
+During a streaming assistant message, `text_delta' events arrive
+many times per second.  Repainting the full message body for each
+is O(N) per delta and dominates CPU on long messages.  Instead we
+update the overlay's cached text immediately and schedule a
+single repaint on this idle timer.  `message_end' (and other
+finalizers) flush synchronously."
+  :type 'number
+  :group 'cavemacs)
+
+(defcustom cavemacs-render-streaming-gc-threshold (* 64 1024 1024)
+  "Value bound to `gc-cons-threshold' while a turn is streaming.
+
+String churn from delta concatenation triggers GC mid-stream and
+shows up as visible stutter.  Restored to the prior value on
+`turn_end' / `agent_end'."
+  :type 'integer
+  :group 'cavemacs)
+
+(defvar-local cavemacs-render--pending-repaint nil
+  "If non-nil, the overlay scheduled for a coalesced repaint.")
+
+(defvar-local cavemacs-render--repaint-timer nil
+  "Idle timer that flushes the pending streaming repaint.")
+
+(defvar-local cavemacs-render--saved-gc-threshold nil
+  "Previous `gc-cons-threshold' to restore at end of turn.")
+
+(defmacro cavemacs-render--with-fast-insert (&rest body)
+  "Run BODY with foreign modification hooks disabled and undo off.
+
+Keeps `after-change-functions' (hl-line, whitespace-mode, lsp,
+etc.) and undo-list growth from dominating render time on big
+streams.  Buffer text changes are still visible to redisplay."
+  (declare (indent 0) (debug t))
+  `(let ((inhibit-modification-hooks t)
+         (buffer-undo-list t))
+     ,@body))
+
+(defun cavemacs-render--bump-gc ()
+  "Raise `gc-cons-threshold' for a streaming turn if not already raised."
+  (unless cavemacs-render--saved-gc-threshold
+    (setq cavemacs-render--saved-gc-threshold gc-cons-threshold
+          gc-cons-threshold (max gc-cons-threshold
+                                 cavemacs-render-streaming-gc-threshold))))
+
+(defun cavemacs-render--restore-gc ()
+  "Restore `gc-cons-threshold' saved by `cavemacs-render--bump-gc'."
+  (when cavemacs-render--saved-gc-threshold
+    (setq gc-cons-threshold cavemacs-render--saved-gc-threshold
+          cavemacs-render--saved-gc-threshold nil)))
+
+(defun cavemacs-render--cancel-repaint-timer ()
+  (when (timerp cavemacs-render--repaint-timer)
+    (cancel-timer cavemacs-render--repaint-timer)
+    (setq cavemacs-render--repaint-timer nil)))
+
+(defun cavemacs-render--flush-pending-repaint (buf)
+  "Run the deferred streaming repaint for BUF, if any."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (cavemacs-render--cancel-repaint-timer)
+      (let ((ov cavemacs-render--pending-repaint))
+        (setq cavemacs-render--pending-repaint nil)
+        (when (and ov (overlay-buffer ov)
+                   (not (overlay-get ov 'cavemacs-finalized)))
+          (cavemacs-render--repaint-assistant ov t))))))
+
+(defun cavemacs-render--schedule-repaint (ov)
+  "Schedule a coalesced repaint of assistant overlay OV."
+  (setq cavemacs-render--pending-repaint ov)
+  (unless (timerp cavemacs-render--repaint-timer)
+    (let ((buf (current-buffer)))
+      (setq cavemacs-render--repaint-timer
+            (run-with-idle-timer
+             cavemacs-render-repaint-idle nil
+             #'cavemacs-render--flush-pending-repaint buf)))))
+
 (defun cavemacs-render-init-buffer ()
   "Initialize buffer-local render state."
-  (setq cavemacs-render--turn-overlays nil
+  (cavemacs-render--cancel-repaint-timer)
+  (cavemacs-render--restore-gc)
+  (setq cavemacs-render--pending-repaint nil
+        cavemacs-render--turn-overlays nil
         cavemacs-render--message-overlays (make-hash-table :test 'equal)
         cavemacs-render--current-assistant-ov nil
         cavemacs-render--tool-overlays (make-hash-table :test 'equal)
@@ -352,6 +437,8 @@ area), advance their point + window-points to the new `point-max'
 after BODY runs so RET continues to submit the next prompt."
   (declare (indent 0) (debug t))
   `(let* ((inhibit-read-only t)
+          (inhibit-modification-hooks t)
+          (buffer-undo-list t)
           (orig-point (point))
           (was-at-end (= orig-point (point-max)))
           (orig-window-points
@@ -623,6 +710,7 @@ M-x cavemacs-shell-restart to start a new process.\n"
   (cavemacs-pretty-state-put :status 'busy))
 
 (defun cavemacs-render--on-turn-start (_event)
+  (cavemacs-render--bump-gc)
   (cavemacs-pretty-state-put :status 'busy))
 
 ;; -----------------------------------------------------------------------------
@@ -727,10 +815,12 @@ messages render with no header at all."
   (when-let* ((ov cavemacs-render--current-assistant-ov)
               ((overlay-buffer ov))
               (ame (alist-get 'assistantMessageEvent event)))
-    (let ((kind (alist-get 'type ame)))
+    (let ((kind (alist-get 'type ame))
+          (immediate nil))
       (pcase kind
         ("text_start"
-         (overlay-put ov 'cavemacs-text ""))
+         (overlay-put ov 'cavemacs-text "")
+         (setq immediate t))
         ("text_delta"
          (let* ((delta (or (alist-get 'delta ame) ""))
                 (cur (or (overlay-get ov 'cavemacs-text) "")))
@@ -739,16 +829,23 @@ messages render with no header at all."
          (let ((final (or (alist-get 'content ame)
                           (overlay-get ov 'cavemacs-text)
                           "")))
-           (overlay-put ov 'cavemacs-text final)))
+           (overlay-put ov 'cavemacs-text final))
+         (setq immediate t))
         ("thinking_start"
-         (overlay-put ov 'cavemacs-thinking ""))
+         (overlay-put ov 'cavemacs-thinking "")
+         (setq immediate t))
         ("thinking_delta"
          (let* ((delta (or (alist-get 'delta ame) ""))
                 (cur (or (overlay-get ov 'cavemacs-thinking) "")))
            (overlay-put ov 'cavemacs-thinking (concat cur delta))))
-        ("thinking_end" nil)
-        (_ nil)))
-    (cavemacs-render--repaint-assistant ov)
+        ("thinking_end" (setq immediate t))
+        (_ nil))
+      (if immediate
+          (progn
+            (cavemacs-render--cancel-repaint-timer)
+            (setq cavemacs-render--pending-repaint nil)
+            (cavemacs-render--repaint-assistant ov))
+        (cavemacs-render--schedule-repaint ov)))
     (when-let* ((msg (alist-get 'message event))
                 (usage (alist-get 'usage msg)))
       (setq cavemacs-render--meta
@@ -764,8 +861,13 @@ messages render with no header at all."
 ;; Assistant repaint: bubble + markdown + code blocks
 ;; -----------------------------------------------------------------------------
 
-(defun cavemacs-render--repaint-assistant (ov)
-  "Re-render assistant overlay OV's body region from cached text/thinking."
+(defun cavemacs-render--repaint-assistant (&optional ov streaming)
+  "Re-render assistant overlay OV's body region from cached text/thinking.
+
+When STREAMING is non-nil, skip markdown fontification and code-block
+decoration — those are O(N) per call and dominate CPU on long
+messages.  A final non-streaming repaint runs on `text_end' /
+`message_end' to apply them once."
   (let ((inhibit-read-only t)
         (body-start (overlay-get ov 'cavemacs-body-start))
         (ov-end (overlay-end ov))
@@ -777,6 +879,7 @@ messages render with no header at all."
         (face 'cavemacs-pretty-assistant-rule-face))
     (when (and (buffer-live-p buf) body-start ov-end)
       (with-current-buffer buf
+        (cavemacs-render--with-fast-insert
         ;; Emit deferred header on first prose/thinking content.
         (cavemacs-render--maybe-emit-header ov)
         (setq body-start (overlay-get ov 'cavemacs-body-start)
@@ -820,6 +923,7 @@ messages render with no header at all."
             (unless (string-empty-p text)
               (let ((rendered
                      (if (and (not is-error)
+                              (not streaming)
                               cavemacs-render-fontify-markdown
                               (or (featurep 'markdown-mode)
                                   (require 'markdown-mode nil t)))
@@ -832,12 +936,13 @@ messages render with no header at all."
              (is-error
               (put-text-property text-start (point) 'face
                                  'cavemacs-error-face))
-             ((and cavemacs-render-fontify-markdown
+             ((and (not streaming)
+                   cavemacs-render-fontify-markdown
                    (or (featurep 'markdown-mode)
                        (require 'markdown-mode nil t)))
               (cavemacs-render--decorate-code-blocks text-start (point))
               (cavemacs-render--apply-variable-pitch text-start (point))))
-            (move-overlay ov (overlay-start ov) (point))))))))
+            (move-overlay ov (overlay-start ov) (point)))))))))
 
 (defun cavemacs-render--fontify-markdown-string (text)
   "Return TEXT with markdown-mode font-lock faces applied as text properties."
@@ -930,16 +1035,23 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
          (error-message (alist-get 'errorMessage msg)))
     (when-let* ((ov (and key (gethash key cavemacs-render--message-overlays))))
       (when (eq (overlay-get ov 'cavemacs-role) 'assistant)
+        ;; Flush any deferred streaming repaint for this overlay before
+        ;; we run the final fontified repaint.
+        (when (eq ov cavemacs-render--pending-repaint)
+          (cavemacs-render--cancel-repaint-timer)
+          (setq cavemacs-render--pending-repaint nil))
         (let ((full (cavemacs-render--message-text msg)))
           (when (and full (not (string-empty-p full)))
-            (overlay-put ov 'cavemacs-text full)
-            (cavemacs-render--repaint-assistant ov)))
+            (overlay-put ov 'cavemacs-text full)))
+        (cavemacs-render--repaint-assistant ov)
         (when (and (equal stop-reason "error") error-message)
           (overlay-put ov 'cavemacs-text
                        (cavemacs-render--format-error error-message))
           (overlay-put ov 'cavemacs-error t)
           (cavemacs-pretty-state-put :status 'error)
           (cavemacs-render--repaint-assistant ov))
+        ;; Freeze: later events must not re-render this overlay.
+        (overlay-put ov 'cavemacs-finalized t)
         (when (eq ov cavemacs-render--current-assistant-ov)
           (setq cavemacs-render--current-assistant-ov nil))))))
 
@@ -1340,10 +1452,14 @@ then under the project root."
 ;; -----------------------------------------------------------------------------
 
 (defun cavemacs-render--on-turn-end (_event)
+  (cavemacs-render--flush-pending-repaint (current-buffer))
+  (cavemacs-render--restore-gc)
   (cavemacs-pretty-state-put :status 'idle))
 
 (defun cavemacs-render--on-agent-end (_event)
   "Insert a per-run footer with token / cost stats."
+  (cavemacs-render--flush-pending-repaint (current-buffer))
+  (cavemacs-render--restore-gc)
   (cavemacs-pretty-state-put :status 'idle)
   (when cavemacs-render--meta
     (let* ((m cavemacs-render--meta)
