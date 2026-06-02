@@ -54,6 +54,22 @@ stays at the bottom of the buffer.")
   "Marker at the first user-editable position (just after the prompt prefix).
 Point-max minus this marker is the user's current input.")
 
+(defvar-local cavemacs-shell--input-history nil
+  "List of previously-sent prompts in this buffer, newest first.")
+
+(defvar-local cavemacs-shell--history-index nil
+  "Current index into `cavemacs-shell--input-history' during navigation.
+0 = most recent.  nil means the user is editing live input (not navigating).")
+
+(defvar-local cavemacs-shell--history-stash nil
+  "Live input text saved when history navigation begins.
+Restored when the user navigates past the most recent entry.")
+
+(defcustom cavemacs-shell-input-history-size 100
+  "Maximum number of prompts kept in `cavemacs-shell--input-history'."
+  :type 'integer
+  :group 'cavemacs)
+
 (defvar-local cavemacs-shell--project-root nil
   "Absolute project root directory associated with this buffer.")
 
@@ -97,6 +113,10 @@ Takes one argument: the project name."
     (define-key map (kbd "C-c C-r") #'cavemacs-shell-restart)
     (define-key map (kbd "M-{")     #'cavemacs-render-previous-turn)
     (define-key map (kbd "M-}")     #'cavemacs-render-next-turn)
+    (define-key map (kbd "C-p")     #'cavemacs-shell-previous-line-or-input)
+    (define-key map (kbd "C-n")     #'cavemacs-shell-next-line-or-input)
+    (define-key map (kbd "<up>")    #'cavemacs-shell-previous-line-or-input)
+    (define-key map (kbd "<down>")  #'cavemacs-shell-next-line-or-input)
     (define-key map (kbd "C-a")     #'cavemacs-shell-beginning-of-line)
     (define-key map (kbd "<home>")  #'cavemacs-shell-beginning-of-line)
     (define-key map (kbd "C-c TAB") #'cavemacs-render-toggle-all)
@@ -426,6 +446,112 @@ that leaves users guessing what to do."
     (delete-region (marker-position cavemacs-shell--input-start-marker)
                    (point-max))))
 
+(defun cavemacs-shell--history-push (text)
+  "Push TEXT onto the input history (dedup-adjacent, cap to size)."
+  (when (and text (not (string-empty-p text))
+             (not (equal text (car cavemacs-shell--input-history))))
+    (push text cavemacs-shell--input-history)
+    (when (> (length cavemacs-shell--input-history)
+             cavemacs-shell-input-history-size)
+      (setcdr (nthcdr (1- cavemacs-shell-input-history-size)
+                      cavemacs-shell--input-history)
+              nil)))
+  ;; Reset navigation state — next C-p starts from the newest entry.
+  (setq cavemacs-shell--history-index nil
+        cavemacs-shell--history-stash nil))
+
+(defun cavemacs-shell--input-area-p ()
+  "Non-nil when point is inside the user input area."
+  (and cavemacs-shell--input-start-marker
+       (marker-position cavemacs-shell--input-start-marker)
+       (>= (point) (marker-position cavemacs-shell--input-start-marker))))
+
+(defun cavemacs-shell--input-on-first-line-p ()
+  "Non-nil when point is on the first line of the input area."
+  (and (cavemacs-shell--input-area-p)
+       (save-excursion
+         (let ((p (point)))
+           (goto-char (marker-position cavemacs-shell--input-start-marker))
+           (= (line-number-at-pos p) (line-number-at-pos))))))
+
+(defun cavemacs-shell--input-on-last-line-p ()
+  "Non-nil when point is on the last line of the input area."
+  (and (cavemacs-shell--input-area-p)
+       (= (line-number-at-pos (point))
+          (line-number-at-pos (point-max)))))
+
+(defun cavemacs-shell--replace-input (text)
+  "Replace the input area contents with TEXT and put point at end."
+  (let ((inhibit-read-only t))
+    (cavemacs-shell--clear-input)
+    (goto-char (point-max))
+    (insert (or text ""))))
+
+(defun cavemacs-shell-previous-input ()
+  "Replace the input area with the previous prompt from history.
+
+On first invocation, stash whatever the user was typing so we can
+restore it when they walk past the most recent entry."
+  (interactive)
+  (unless cavemacs-shell--input-history
+    (user-error "cavemacs: no prompt history yet"))
+  (when (null cavemacs-shell--history-index)
+    (setq cavemacs-shell--history-stash (or (cavemacs-shell--input-text) ""))
+    (setq cavemacs-shell--history-index -1))
+  (let ((next (1+ cavemacs-shell--history-index)))
+    (when (>= next (length cavemacs-shell--input-history))
+      (user-error "cavemacs: beginning of prompt history"))
+    (setq cavemacs-shell--history-index next)
+    (cavemacs-shell--replace-input
+     (nth next cavemacs-shell--input-history))))
+
+(defun cavemacs-shell-next-input ()
+  "Replace the input area with the next (more recent) prompt from history.
+
+When already at the most recent entry, restore whatever the user
+was typing before they started navigating."
+  (interactive)
+  (unless cavemacs-shell--history-index
+    (user-error "cavemacs: not navigating prompt history"))
+  (let ((next (1- cavemacs-shell--history-index)))
+    (cond
+     ((< next 0)
+      (cavemacs-shell--replace-input cavemacs-shell--history-stash)
+      (setq cavemacs-shell--history-index nil
+            cavemacs-shell--history-stash nil))
+     (t
+      (setq cavemacs-shell--history-index next)
+      (cavemacs-shell--replace-input
+       (nth next cavemacs-shell--input-history))))))
+
+(defun cavemacs-shell-previous-line-or-input ()
+  "`previous-line' inside multi-line input; cycle history on the first line.
+
+Outside the input area, behaves as ordinary `previous-line'."
+  (interactive)
+  (cond
+   ((not (cavemacs-shell--input-area-p))
+    (call-interactively #'previous-line))
+   ((cavemacs-shell--input-on-first-line-p)
+    (cavemacs-shell-previous-input))
+   (t
+    (call-interactively #'previous-line))))
+
+(defun cavemacs-shell-next-line-or-input ()
+  "`next-line' inside multi-line input; cycle history on the last line.
+
+Outside the input area, behaves as ordinary `next-line'."
+  (interactive)
+  (cond
+   ((not (cavemacs-shell--input-area-p))
+    (call-interactively #'next-line))
+   ((cavemacs-shell--input-on-last-line-p)
+    (if cavemacs-shell--history-index
+        (cavemacs-shell-next-input)
+      (call-interactively #'next-line)))
+   (t
+    (call-interactively #'next-line))))
+
 (defun cavemacs-shell-insert-newline ()
   "Insert a literal newline in the input area."
   (interactive)
@@ -534,6 +660,7 @@ itself."
   (let ((text (cavemacs-shell--input-text)))
     (when (or (null text) (string-empty-p text))
       (user-error "cavemacs: nothing to send"))
+    (cavemacs-shell--history-push text)
     (cavemacs-shell--clear-input)
     (cond
      ;; Local dispatch for built-in slash commands.

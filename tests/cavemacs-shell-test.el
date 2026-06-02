@@ -163,5 +163,56 @@ Regression: previously only agent_end cleared it."
           (should (eq (cavemacs-pretty-state-get :status) 'idle)))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-shell/history-prev-and-next ()
+  "C-p / C-n cycle through previously-sent prompts and restore live input."
+  (let ((buf (cavemacs-shell-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-shell--history-push "first")
+          (cavemacs-shell--history-push "second")
+          (cavemacs-shell--history-push "third")
+          (goto-char (point-max))
+          (insert "draft")
+          (cavemacs-shell-previous-input)
+          (should (equal "third" (cavemacs-shell--input-text)))
+          (cavemacs-shell-previous-input)
+          (should (equal "second" (cavemacs-shell--input-text)))
+          (cavemacs-shell-previous-input)
+          (should (equal "first" (cavemacs-shell--input-text)))
+          (should-error (cavemacs-shell-previous-input))
+          (cavemacs-shell-next-input)
+          (should (equal "second" (cavemacs-shell--input-text)))
+          (cavemacs-shell-next-input)
+          (should (equal "third" (cavemacs-shell--input-text)))
+          (cavemacs-shell-next-input)
+          (should (equal "draft" (cavemacs-shell--input-text)))
+          (should-not cavemacs-shell--history-index))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-shell/history-dedup-adjacent ()
+  "Repeated identical pushes collapse to a single history entry."
+  (let ((buf (cavemacs-shell-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-shell--history-push "same")
+          (cavemacs-shell--history-push "same")
+          (cavemacs-shell--history-push "same")
+          (should (equal '("same") cavemacs-shell--input-history)))
+      (kill-buffer buf))))
+
+(ert-deftest cavemacs-shell/c-p-on-non-first-line-moves-line ()
+  "In multi-line input, C-p on a non-first line acts like `previous-line'."
+  (let ((buf (cavemacs-shell-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-shell--history-push "old prompt")
+          (goto-char (point-max))
+          (insert "line one\nline two")
+          (cavemacs-shell-previous-line-or-input)
+          (should (string-match-p "line one\nline two"
+                                  (buffer-substring-no-properties
+                                   (point-min) (point-max)))))
+      (kill-buffer buf))))
+
 (provide 'cavemacs-shell-test)
 ;;; cavemacs-shell-test.el ends here

@@ -467,9 +467,15 @@ after BODY runs so RET continues to submit the next prompt."
        (let ((wp (window-point w)))
          (when (= wp (point-max))
            (with-selected-window w
-             (save-excursion
-               (goto-char wp)
-               (recenter -1))))))))
+             ;; Only recenter when the input area is actually off-screen.
+             ;; If the user scrolled up to read history but left point at
+             ;; the bottom, redisplay can still keep point visible without
+             ;; us yanking the viewport down on every streaming repaint.
+             (when (or (> (point-max) (window-end w t))
+                       (< (point-max) (window-start w)))
+               (save-excursion
+                 (goto-char wp)
+                 (recenter -1)))))))))
 
 (defun cavemacs-render--ensure-newline-before ()
   "Insert a newline before point unless we're at BOB or after a LF."
@@ -1079,12 +1085,29 @@ messages.  A final non-streaming repaint runs on `text_end' /
               (cavemacs-render--apply-variable-pitch text-start (point))))
             (move-overlay ov (overlay-start ov) (point)))))))))
 
+(defvar cavemacs-render--fontify-scratch-buffer nil
+  "Persistent hidden buffer used by `cavemacs-render--fontify-markdown-string'.
+
+We reuse one buffer across fontify calls so we pay the markdown-mode
+init cost (keymap, syntax table, font-lock keywords) once per Emacs
+session instead of once per assistant message.")
+
+(defun cavemacs-render--fontify-scratch ()
+  "Return the live fontify scratch buffer, creating it on first use."
+  (let ((buf cavemacs-render--fontify-scratch-buffer))
+    (unless (and buf (buffer-live-p buf))
+      (setq buf (generate-new-buffer " *cavemacs-fontify*" t))
+      (with-current-buffer buf
+        (delay-mode-hooks (markdown-mode)))
+      (setq cavemacs-render--fontify-scratch-buffer buf))
+    buf))
+
 (defun cavemacs-render--fontify-markdown-string (text)
   "Return TEXT with markdown-mode font-lock faces applied as text properties."
   (condition-case _
-      (with-temp-buffer
+      (with-current-buffer (cavemacs-render--fontify-scratch)
+        (erase-buffer)
         (insert text)
-        (delay-mode-hooks (markdown-mode))
         (font-lock-ensure (point-min) (point-max))
         (buffer-string))
     (error text)))
