@@ -44,8 +44,20 @@ For every code change the user needs to reload to test, do ALL of:
    at the top of `cavemacs.el` to match.
 5. `git add` + `git commit` (conventional-commit style; explain WHY
    and any non-obvious mechanics).
-6. `git push` to `origin/main`.
-7. Refresh the user's straight clone so they're not running stale
+6. Tag the commit with the new version:
+   ```bash
+   git tag v0.0.X
+   ```
+   Use the same `X.Y.Z` you bumped to in step 4, prefixed with
+   `v` (e.g. `v0.0.37`). Tags make it trivial to bisect or roll
+   back to a known-good release.
+7. `git push` to `origin/main`, including the new tag:
+   ```bash
+   git push origin main
+   git push origin v0.0.X
+   ```
+   (or `git push --follow-tags` to do both in one call.)
+8. Refresh the user's straight clone so they're not running stale
    code, AND rebuild so the .elc files match the new source:
    ```bash
    cd ~/.emacs.d/straight/repos/cavemacs && git pull --ff-only
@@ -60,11 +72,11 @@ For every code change the user needs to reload to test, do ALL of:
    rebuild guarantees the .elc files are current before the user
    restarts. Without this step the user can restart into stale
    byte-compiled code even though the .el source is fresh.
-8. Verify parity: the SHA from `git log --oneline -1` in the user's
+9. Verify parity: the SHA from `git log --oneline -1` in the user's
    straight clone must match `origin/main`.
-9. Tell the user: "Restart Emacs. Header-line should read
-   `cavemacs X.Y.Z` (the new PATCH)." If they report the old PATCH,
-   they're still on stale code.
+10. Tell the user: "Restart Emacs. Header-line should read
+    `cavemacs X.Y.Z` (the new PATCH)." If they report the old PATCH,
+    they're still on stale code.
 
 Doc-only changes (README, AGENTS.md, plan.org) and test-only
 changes that don't affect runtime do NOT need a version bump or a
