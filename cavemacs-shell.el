@@ -124,6 +124,32 @@ Takes one argument: the project name."
     map)
   "Keymap for `cavemacs-shell-mode'.")
 
+(defcustom cavemacs-shell-markdown-header-scales
+  '((1 . 1.5) (2 . 1.35) (3 . 1.2) (4 . 1.1) (5 . 1.05) (6 . 1.0))
+  "Per-level scale factors for markdown headings rendered in the chat buffer.
+
+Applied via buffer-local `face-remap-add-relative' on
+`markdown-header-face-N' so other markdown buffers are untouched.
+Set a level to nil (or remove it) to leave that level unchanged."
+  :type '(alist :key-type integer :value-type (choice (const nil) number))
+  :group 'cavemacs)
+
+(defun cavemacs-shell--remap-markdown-header-faces ()
+  "Buffer-locally scale up markdown heading faces.
+
+markdown-mode's default header faces are merely bold; in a chat
+buffer that makes H1…H6 visually indistinguishable from the
+surrounding prose.  Scale them per
+`cavemacs-shell-markdown-header-scales' without leaking the
+change to other buffers."
+  (require 'markdown-mode nil t)
+  (dolist (entry cavemacs-shell-markdown-header-scales)
+    (let* ((level (car entry))
+           (scale (cdr entry))
+           (face (intern (format "markdown-header-face-%d" level))))
+      (when (and scale (facep face))
+        (face-remap-add-relative face `(:height ,scale :weight bold))))))
+
 (define-derived-mode cavemacs-shell-mode fundamental-mode "cavemacs"
   "Major mode for cavemacs chat buffers."
   :group 'cavemacs
@@ -159,6 +185,7 @@ Takes one argument: the project name."
   ;; buffer.
   (cavemacs-shell--neutralize-rival-tab-bindings)
   (cavemacs-pretty-maybe-enable)
+  (cavemacs-shell--remap-markdown-header-faces)
   (add-to-invisibility-spec 'cavemacs-collapse)
   (add-hook 'kill-buffer-hook #'cavemacs-shell--on-kill nil t))
 
