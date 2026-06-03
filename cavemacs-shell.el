@@ -582,11 +582,16 @@ movement commands."
                           (marker-position
                            cavemacs-shell--input-start-marker))))
     (cond
-     ;; Inside input area: jump to its first editable column.  We
-     ;; intentionally ignore ARG here; nobody types `C-u 3 C-a' to
-     ;; move three lines into a multi-line prompt.
+     ;; Inside input area.  On the prompt line itself (the one
+     ;; with the `> ' prefix) jump past the prefix to the first
+     ;; editable column.  On any subsequent line of a multi-line
+     ;; prompt, behave like ordinary `move-beginning-of-line' so
+     ;; the user can reach column 0 of that continuation line.
      ((and input-start (>= (point) input-start))
-      (goto-char input-start))
+      (let ((line-bol (line-beginning-position)))
+        (if (<= line-bol input-start)
+            (goto-char input-start)
+          (goto-char line-bol))))
      ;; Above input area: standard line-beginning behaviour.
      (t
       (move-beginning-of-line (or arg 1))))))

@@ -47,6 +47,21 @@ not at column 0 (inside the read-only `> ' prefix)."
                      (marker-position cavemacs-shell--input-start-marker))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-shell/beginning-of-line-multiline-continuation ()
+  "C-a on a continuation line of a multi-line prompt must go to
+column 0 of that line, not back to the prompt-prefix line."
+  (let ((buf (cavemacs-shell-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char (point-max))
+          (insert "line one\nline two")
+          (cavemacs-shell-beginning-of-line)
+          (should (= (point) (line-beginning-position)))
+          (should (not (= (point)
+                          (marker-position
+                           cavemacs-shell--input-start-marker)))))
+      (kill-buffer buf))))
+
 (ert-deftest cavemacs-shell/beginning-of-line-output-region ()
   "C-a above the input area must behave as ordinary
 `move-beginning-of-line' (lands at column 0 of the current line)."
