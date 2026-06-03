@@ -776,13 +776,7 @@ toolResult messages by `toolCallId'."
       'cavemacs-meta-face))
     ("auto_retry_end"       nil)
     ("checkpoint_taken" nil)
-    ("subagent_progress"
-     (cavemacs-render--notice
-      (format "[subagent %s] %s%s"
-              (alist-get 'subagentName event)
-              (alist-get 'phase event)
-              (if-let ((d (alist-get 'detail event))) (concat ": " d) ""))
-      'cavemacs-meta-face))
+    ("subagent_progress" nil)
     ("extension_error"
      (cavemacs-render--notice
       (format "Extension error in %s: %s"
@@ -1318,13 +1312,23 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                                          (cavemacs-pretty-glyph 'box-h)))
                          " running "
                          (make-string 4 (string-to-char
-                                         (cavemacs-pretty-glyph 'box-h))))))
+                                         (cavemacs-pretty-glyph 'box-h)))))
+                 (block-id (and tool-id (format "tool:%s" tool-id))))
             (insert body-prefix)
             (insert (propertize "running…" 'face 'cavemacs-pretty-meta-face))
             (insert "\n")
             (let ((body-end (point)))
-              (insert (propertize close 'face face 'cavemacs-rule t))
-              (insert (propertize "\n" 'cavemacs-rule t))
+              (insert (propertize close
+                                  'face face
+                                  'cavemacs-rule t
+                                  'cavemacs-collapse-id block-id
+                                  'keymap cavemacs-render-toggle-map
+                                  'mouse-face 'highlight
+                                  'help-echo "TAB / RET / mouse-1: toggle"))
+              (insert (propertize "\n"
+                                  'cavemacs-rule t
+                                  'cavemacs-collapse-id block-id
+                                  'keymap cavemacs-render-toggle-map))
               ;; Markers so --on-tool-end can find and delete this
               ;; placeholder region precisely, regardless of any
               ;; intervening inserts above us.
@@ -1448,10 +1452,19 @@ empty string when ARGS has no displayable content."
                                                (cavemacs-pretty-glyph 'box-h)))
                                (or duration-str "")
                                (make-string 4 (string-to-char
-                                               (cavemacs-pretty-glyph 'box-h))))))
-                  (insert (propertize close 'face rule-face
-                                      'cavemacs-rule t))
-                  (insert (propertize "\n" 'cavemacs-rule t)))
+                                               (cavemacs-pretty-glyph 'box-h)))))
+                       (block-id (and tool-id (format "tool:%s" tool-id))))
+                  (insert (propertize close
+                                      'face rule-face
+                                      'cavemacs-rule t
+                                      'cavemacs-collapse-id block-id
+                                      'keymap cavemacs-render-toggle-map
+                                      'mouse-face 'highlight
+                                      'help-echo "TAB / RET / mouse-1: toggle"))
+                  (insert (propertize "\n"
+                                      'cavemacs-rule t
+                                      'cavemacs-collapse-id block-id
+                                      'keymap cavemacs-render-toggle-map)))
                 ;; Register the body region (body-beg .. body-end) as
                 ;; the collapsible region.  Header is the line we wrote
                 ;; in --on-tool-start.
