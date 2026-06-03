@@ -164,7 +164,7 @@ Regression: previously only agent_end cleared it."
       (kill-buffer buf))))
 
 (ert-deftest cavemacs-shell/history-prev-and-next ()
-  "C-p / C-n cycle through previously-sent prompts and restore live input."
+  "M-p / M-n cycle through previously-sent prompts and restore live input."
   (let ((buf (cavemacs-shell-test--fresh-buffer)))
     (unwind-protect
         (with-current-buffer buf
@@ -201,7 +201,7 @@ Regression: previously only agent_end cleared it."
       (kill-buffer buf))))
 
 (ert-deftest cavemacs-shell/c-p-on-non-first-line-moves-line ()
-  "In multi-line input, C-p on a non-first line acts like `previous-line'."
+  "In multi-line input, <up> on a non-first line acts like `previous-line'."
   (let ((buf (cavemacs-shell-test--fresh-buffer)))
     (unwind-protect
         (with-current-buffer buf

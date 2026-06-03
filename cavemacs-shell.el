@@ -113,8 +113,8 @@ Takes one argument: the project name."
     (define-key map (kbd "C-c C-r") #'cavemacs-shell-restart)
     (define-key map (kbd "M-{")     #'cavemacs-render-previous-turn)
     (define-key map (kbd "M-}")     #'cavemacs-render-next-turn)
-    (define-key map (kbd "C-p")     #'cavemacs-shell-previous-line-or-input)
-    (define-key map (kbd "C-n")     #'cavemacs-shell-next-line-or-input)
+    (define-key map (kbd "M-p")     #'cavemacs-shell-previous-input)
+    (define-key map (kbd "M-n")     #'cavemacs-shell-next-input)
     (define-key map (kbd "<up>")    #'cavemacs-shell-previous-line-or-input)
     (define-key map (kbd "<down>")  #'cavemacs-shell-next-line-or-input)
     (define-key map (kbd "C-a")     #'cavemacs-shell-beginning-of-line)
@@ -456,7 +456,7 @@ that leaves users guessing what to do."
       (setcdr (nthcdr (1- cavemacs-shell-input-history-size)
                       cavemacs-shell--input-history)
               nil)))
-  ;; Reset navigation state — next C-p starts from the newest entry.
+  ;; Reset navigation state — next M-p starts from the newest entry.
   (setq cavemacs-shell--history-index nil
         cavemacs-shell--history-stash nil))
 
