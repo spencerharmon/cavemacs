@@ -775,13 +775,7 @@ toolResult messages by `toolCallId'."
               (alist-get 'errorMessage event))
       'cavemacs-meta-face))
     ("auto_retry_end"       nil)
-    ("checkpoint_taken"
-     (cavemacs-render--notice
-      (format "Checkpoint %s (%s, %s files)"
-              (substring (or (alist-get 'checkpointId event) "?") 0 8)
-              (alist-get 'toolName event)
-              (alist-get 'fileCount event))
-      'cavemacs-meta-face))
+    ("checkpoint_taken" nil)
     ("subagent_progress"
      (cavemacs-render--notice
       (format "[subagent %s] %s%s"
@@ -1293,8 +1287,13 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                                  (cavemacs-pretty-glyph 'box-h)))
                  'face face 'cavemacs-rule t))
         (insert (propertize "\n" 'cavemacs-rule t))
-        (let ((header-end (point))
-              (ov (make-overlay start (point) nil nil t)))
+        (let* ((header-end (point))
+               ;; rear-advance=nil so later insertions (sibling tool
+               ;; cards, notices, anything via --at-output) do NOT
+               ;; drift this overlay's end forward.  --on-tool-end
+               ;; inserts the body at our own non-advancing markers
+               ;; and then move-overlay's end to the new tail.
+               (ov (make-overlay start (point) nil nil nil)))
           (overlay-put ov 'cavemacs-tool-id tool-id)
           (overlay-put ov 'cavemacs-tool-name name)
           (overlay-put ov 'cavemacs-tool-args args)
@@ -1303,16 +1302,43 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
           (overlay-put ov 'cavemacs-header-beg (copy-marker start nil))
           (overlay-put ov 'cavemacs-header-end (copy-marker header-end nil))
           (puthash tool-id ov cavemacs-render--tool-overlays)
-          ;; Register a placeholder collapsible block now (empty body)
-          ;; so the header is toggle-able while the tool is still
-          ;; running.  --on-tool-end re-registers with the real body;
-          ;; the user's collapse choice persists via the id hash.
-          (when tool-id
-            (cavemacs-render--register-block
-             (format "tool:%s" tool-id)
-             start header-end
-             header-end header-end nil)))
-        (cavemacs-render--apply-fringe start (1+ start) 'tool)))))
+          ;; Insert a running-placeholder body + closing line right
+          ;; after the header, so the card is visually complete and
+          ;; collapse-toggleable while the tool runs.  --on-tool-end
+          ;; deletes this placeholder region and writes the real body
+          ;; + final closing line in its place.
+          (let* ((placeholder-beg (point))
+                 (body-prefix (propertize
+                               (concat (cavemacs-pretty-glyph 'box-v) " ")
+                               'face face
+                               'cavemacs-rule t))
+                 (close (concat
+                         (cavemacs-pretty-glyph 'box-bl)
+                         (make-string 4 (string-to-char
+                                         (cavemacs-pretty-glyph 'box-h)))
+                         " running "
+                         (make-string 4 (string-to-char
+                                         (cavemacs-pretty-glyph 'box-h))))))
+            (insert body-prefix)
+            (insert (propertize "running…" 'face 'cavemacs-pretty-meta-face))
+            (insert "\n")
+            (let ((body-end (point)))
+              (insert (propertize close 'face face 'cavemacs-rule t))
+              (insert (propertize "\n" 'cavemacs-rule t))
+              ;; Markers so --on-tool-end can find and delete this
+              ;; placeholder region precisely, regardless of any
+              ;; intervening inserts above us.
+              (overlay-put ov 'cavemacs-placeholder-beg
+                           (copy-marker placeholder-beg nil))
+              (overlay-put ov 'cavemacs-placeholder-end
+                           (copy-marker (point) t))
+              (move-overlay ov start (point))
+              (when tool-id
+                (cavemacs-render--register-block
+                 (format "tool:%s" tool-id)
+                 start header-end
+                 placeholder-beg body-end nil))))
+          (cavemacs-render--apply-fringe start (1+ start) 'tool))))))
 
 (defun cavemacs-render--on-tool-update (_event) nil)
 
@@ -1359,7 +1385,22 @@ empty string when ARGS has no displayable content."
       (let ((inhibit-read-only t))
         (with-current-buffer (overlay-buffer ov)
           (save-excursion
-            (goto-char (overlay-end ov))
+            ;; Delete the running-placeholder region (body line +
+            ;; closing line) and insert the real body + closing line
+            ;; at the exact same position.  Both markers were set in
+            ;; --on-tool-start; placeholder-beg has insertion-type
+            ;; nil so unrelated inserts above us do not drift it.
+            (let ((ph-beg (overlay-get ov 'cavemacs-placeholder-beg))
+                  (ph-end (overlay-get ov 'cavemacs-placeholder-end)))
+              (if (and (markerp ph-beg) (markerp ph-end)
+                       (marker-position ph-beg) (marker-position ph-end))
+                  (progn
+                    (delete-region (marker-position ph-beg)
+                                   (marker-position ph-end))
+                    (goto-char (marker-position ph-beg)))
+                ;; Defensive fallback: nothing to delete, just go to
+                ;; whatever the overlay thinks its end is.
+                (goto-char (overlay-end ov))))
             (let* ((text (cavemacs-render--render-tool-result result))
                    (args (and ov (overlay-get ov 'cavemacs-tool-args)))
                    (args-str (cavemacs-render--format-tool-args-full args))
