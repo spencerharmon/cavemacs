@@ -1156,8 +1156,8 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
             (when (fboundp 'buttonize)
               (save-excursion
                 (goto-char (match-end 0))
-                (let ((text (buffer-substring-no-properties
-                             block-start block-end))
+                (let ((text (substring-no-properties
+                             (filter-buffer-substring block-start block-end)))
                       (bov (make-overlay (match-beginning 0) (match-end 0))))
                   (overlay-put
                    bov 'after-string
