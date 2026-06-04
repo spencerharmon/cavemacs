@@ -81,6 +81,35 @@ still work alongside this flag."
   :type 'boolean
   :group 'cavemacs)
 
+(defcustom cavemacs-system-prompt nil
+  "Replacement system prompt for caveman, or nil for the built-in default.
+
+Passed as `--system-prompt VALUE' to the caveman subprocess.  When
+non-nil this fully overrides caveman-code's built-in coding-assistant
+system prompt; use `cavemacs-append-system-prompt' instead if you only
+want to add to it."
+  :type '(choice (const :tag "caveman default" nil) string)
+  :group 'cavemacs)
+
+(defcustom cavemacs-append-system-prompt
+  "Respond like smart caveman. Cut all filler, keep technical substance.
+- Drop articles (a, an, the), filler (just, really, basically, actually).
+- Drop pleasantries (sure, certainly, happy to).
+- No hedging. Fragments fine. Short synonyms.
+- Technical terms stay exact. Code blocks unchanged.
+- Pattern: [thing] [action] [reason]. [next step]."
+  "Text appended to caveman's system prompt at session start.
+
+Passed as `--append-system-prompt VALUE' to the caveman subprocess.
+The default is a compact \"caveman microprompt\" that nudges the agent
+toward terse, telegraphic prose without requiring the upstream caveman
+skill to be installed.  Set to nil to skip the flag entirely.
+
+Caveman accepts either literal text or a file path here; if VALUE
+names an existing file, caveman reads its contents."
+  :type '(choice (const :tag "None" nil) string)
+  :group 'cavemacs)
+
 (defun cavemacs--binary ()
   "Resolve the caveman executable, honouring `cavemacs-binary'."
   (or (and cavemacs-binary
@@ -110,6 +139,13 @@ still work alongside this flag."
       (setq args (append args (list "--no-prompt-templates"))))
     (when cavemacs-no-themes
       (setq args (append args (list "--no-themes"))))
+    (when (and cavemacs-system-prompt
+               (not (string-empty-p cavemacs-system-prompt)))
+      (setq args (append args (list "--system-prompt" cavemacs-system-prompt))))
+    (when (and cavemacs-append-system-prompt
+               (not (string-empty-p cavemacs-append-system-prompt)))
+      (setq args (append args (list "--append-system-prompt"
+                                    cavemacs-append-system-prompt))))
     (append args cavemacs-extra-args)))
 
 (provide 'cavemacs-config)

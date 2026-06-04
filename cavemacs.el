@@ -2,7 +2,7 @@
 
 ;; Author: Spencer Harmon <spencer@spencerharmon.com>
 ;; URL: https://github.com/spencerharmon/cavemacs
-;; Version: 0.0.40
+;; Version: 0.0.41
 ;; Package-Requires: ((emacs "30.1") (markdown-mode "2.5") (transient "0.7"))
 ;; Keywords: tools, convenience, ai
 ;; SPDX-License-Identifier: MIT
@@ -28,7 +28,7 @@
 
 ;;; Code:
 
-(defconst cavemacs-version "0.0.40"
+(defconst cavemacs-version "0.0.41"
   "Cavemacs version. Bumped manually when tagging a release.")
 
 (require 'cavemacs-config)
