@@ -57,19 +57,26 @@
                            cavemacs-caveman-levels))
   :group 'cavemacs-caveman)
 
-(defcustom cavemacs-caveman-auto-enable t
-  "When to auto-enable caveman at session start.
+(defcustom cavemacs-caveman-auto-enable nil
+  "When to auto-enable the caveman skill at session start.
 
-- nil: never auto-enable; user opts in.
-- t (default): auto-enable whenever the skill is detected (project or
-  global).  Failing silently when the skill isn't installed is fine --
-  the user just sees uncompressed agent output and can install with
-  M-x cavemacs-caveman-install when they want it.
+- nil (default): never auto-enable.  Cavemacs ships a built-in
+  microprompt via `cavemacs-append-system-prompt' that nudges the
+  agent toward terse output without burning a turn on `/caveman'.
+  Users who want the full skill (lite/full/ultra/wenyan levels,
+  companion commands) opt in per session with
+  \\[cavemacs-caveman-enable] or by setting this to t.
+- t: auto-enable whenever the skill is detected (project or global)
+  by sending `/caveman <level>' as the first turn.
 - function: called with the project root, returns non-nil to enable.
 
-When auto-enable triggers, `cavemacs-caveman-default-level' is used."
-  :type '(choice (const :tag "Never" nil)
-                 (const :tag "Always when installed" t)
+When auto-enable triggers, `cavemacs-caveman-default-level' is used.
+
+Historical note: pre-0.0.42 the default was t, which spent a real
+LLM turn on `/caveman full' every time cavemacs spawned.  The
+microprompt now covers the common case for free."
+  :type '(choice (const :tag "Never (default; microprompt handles it)" nil)
+                 (const :tag "Always when skill installed" t)
                  (function :tag "Predicate"))
   :group 'cavemacs-caveman)
 
