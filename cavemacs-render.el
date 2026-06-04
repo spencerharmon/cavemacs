@@ -776,7 +776,7 @@ toolResult messages by `toolCallId'."
       'cavemacs-meta-face))
     ("auto_retry_end"       nil)
     ("checkpoint_taken" nil)
-    ("subagent_progress" nil)
+    ("subagent_progress" (cavemacs-render--on-subagent-progress event))
     ("extension_error"
      (cavemacs-render--notice
       (format "Extension error in %s: %s"
@@ -1362,66 +1362,150 @@ expand/collapse state."
                         (gethash tool-id cavemacs-render--tool-overlays))))
     (when (and ov (overlay-buffer ov)
                (eq (overlay-get ov 'cavemacs-tool-status) 'running))
-      (let* ((face (or (overlay-get ov 'cavemacs-tool-face)
-                       'cavemacs-pretty-tool-rule-face))
-             (ph-beg (overlay-get ov 'cavemacs-placeholder-beg))
-             (ph-end (overlay-get ov 'cavemacs-placeholder-end))
-             (hdr-beg (overlay-get ov 'cavemacs-header-beg))
-             (hdr-end (overlay-get ov 'cavemacs-header-end))
-             (text (cavemacs-render--render-tool-result partial)))
-        (when (and (markerp ph-beg) (markerp ph-end)
-                   (marker-position ph-beg) (marker-position ph-end)
-                   (stringp text))
-          (with-current-buffer (overlay-buffer ov)
-            (cavemacs-render--at-output
-              (goto-char (marker-position ph-beg))
-              (delete-region (marker-position ph-beg)
-                             (marker-position ph-end))
-              (let* ((body-prefix (propertize
-                                   (concat (cavemacs-pretty-glyph 'box-v) " ")
-                                   'face face
-                                   'cavemacs-rule t))
-                     (trimmed (string-trim-right text))
-                     (lines (if (string-empty-p trimmed)
-                                (list (propertize "running…"
-                                                  'face 'cavemacs-pretty-meta-face))
-                              (split-string trimmed "\n" nil)))
-                     (body (mapconcat (lambda (l) (concat body-prefix l))
-                                      lines "\n"))
-                     (block-id (and tool-id (format "tool:%s" tool-id)))
-                     (body-beg (point)))
-                (insert body)
-                (insert "\n")
-                (let ((body-end (point))
-                      (close (concat
-                              (cavemacs-pretty-glyph 'box-bl)
-                              (make-string 4 (string-to-char
-                                              (cavemacs-pretty-glyph 'box-h)))
-                              " running "
-                              (make-string 4 (string-to-char
-                                              (cavemacs-pretty-glyph 'box-h))))))
-                  (insert (propertize close
-                                      'face face
-                                      'cavemacs-rule t
-                                      'cavemacs-collapse-id block-id
-                                      'keymap cavemacs-render-toggle-map
-                                      'mouse-face 'highlight
-                                      'help-echo "TAB / RET / mouse-1: toggle"))
-                  (insert (propertize "\n"
-                                      'cavemacs-rule t
-                                      'cavemacs-collapse-id block-id
-                                      'keymap cavemacs-render-toggle-map))
-                  (set-marker ph-end (point))
-                  (move-overlay ov (overlay-start ov) (point))
-                  (when (and tool-id
-                             (markerp hdr-beg) (markerp hdr-end)
-                             (marker-position hdr-beg)
-                             (marker-position hdr-end))
-                    (cavemacs-render--register-block
-                     block-id
-                     (marker-position hdr-beg)
-                     (marker-position hdr-end)
-                     body-beg body-end nil)))))))))))
+      (let ((text (cavemacs-render--render-tool-result partial)))
+        (when (stringp text)
+          (cavemacs-render--rewrite-tool-placeholder ov text))))))
+
+(defun cavemacs-render--rewrite-tool-placeholder (ov text)
+  "Replace OV's placeholder body with TEXT (multi-line string).
+
+Shared by `tool_execution_update' (streams partialResult) and the
+`subagent_progress' handler (streams per-event subagent activity
+lines).  Preserves the running closing line, the overlay extent,
+and the collapsible block registration so the user's current
+expand/collapse state and TAB/RET/mouse-1 keybindings keep
+working across updates."
+  (let* ((face (or (overlay-get ov 'cavemacs-tool-face)
+                   'cavemacs-pretty-tool-rule-face))
+         (tool-id (overlay-get ov 'cavemacs-tool-id))
+         (ph-beg (overlay-get ov 'cavemacs-placeholder-beg))
+         (ph-end (overlay-get ov 'cavemacs-placeholder-end))
+         (hdr-beg (overlay-get ov 'cavemacs-header-beg))
+         (hdr-end (overlay-get ov 'cavemacs-header-end)))
+    (when (and (markerp ph-beg) (markerp ph-end)
+               (marker-position ph-beg) (marker-position ph-end))
+      (with-current-buffer (overlay-buffer ov)
+        (cavemacs-render--at-output
+          (goto-char (marker-position ph-beg))
+          (delete-region (marker-position ph-beg)
+                         (marker-position ph-end))
+          (let* ((body-prefix (propertize
+                               (concat (cavemacs-pretty-glyph 'box-v) " ")
+                               'face face
+                               'cavemacs-rule t))
+                 (trimmed (string-trim-right (or text "")))
+                 (lines (if (string-empty-p trimmed)
+                            (list (propertize "running…"
+                                              'face 'cavemacs-pretty-meta-face))
+                          (split-string trimmed "\n" nil)))
+                 (body (mapconcat (lambda (l) (concat body-prefix l))
+                                  lines "\n"))
+                 (block-id (and tool-id (format "tool:%s" tool-id)))
+                 (body-beg (point)))
+            (insert body)
+            (insert "\n")
+            (let ((body-end (point))
+                  (close (concat
+                          (cavemacs-pretty-glyph 'box-bl)
+                          (make-string 4 (string-to-char
+                                          (cavemacs-pretty-glyph 'box-h)))
+                          " running "
+                          (make-string 4 (string-to-char
+                                          (cavemacs-pretty-glyph 'box-h))))))
+              (insert (propertize close
+                                  'face face
+                                  'cavemacs-rule t
+                                  'cavemacs-collapse-id block-id
+                                  'keymap cavemacs-render-toggle-map
+                                  'mouse-face 'highlight
+                                  'help-echo "TAB / RET / mouse-1: toggle"))
+              (insert (propertize "\n"
+                                  'cavemacs-rule t
+                                  'cavemacs-collapse-id block-id
+                                  'keymap cavemacs-render-toggle-map))
+              (set-marker ph-end (point))
+              (move-overlay ov (overlay-start ov) (point))
+              (when (and tool-id
+                         (markerp hdr-beg) (markerp hdr-end)
+                         (marker-position hdr-beg)
+                         (marker-position hdr-end))
+                (cavemacs-render--register-block
+                 block-id
+                 (marker-position hdr-beg)
+                 (marker-position hdr-end)
+                 body-beg body-end nil)))))))))
+
+(defvar-local cavemacs-render--subagent-logs nil
+  "Hash table: task-tool-call-id -> list of formatted progress lines.
+
+Each line is the rendered form of one `subagent_progress' event:
+`SUBAGENT  phase  detail'.  Stored newest-last so the buffer body
+is just `(string-join lines \"\\n\")'.  We key by the outer task
+tool's `toolCallId' because `subagent_progress' events themselves
+carry no tool-call id, so we route by \"every currently-running
+Task card in this buffer\".")
+
+(defun cavemacs-render--running-task-overlays ()
+  "Return the list of currently-running `task' tool-card overlays."
+  (when cavemacs-render--tool-overlays
+    (let (acc)
+      (maphash
+       (lambda (_id ov)
+         (when (and (overlayp ov)
+                    (overlay-buffer ov)
+                    (eq (overlay-get ov 'cavemacs-tool-status) 'running)
+                    (let ((n (overlay-get ov 'cavemacs-tool-name)))
+                      (and (stringp n) (string= n "task"))))
+           (push ov acc)))
+       cavemacs-render--tool-overlays)
+      acc)))
+
+(defun cavemacs-render--format-subagent-line (event)
+  "Format one `subagent_progress' EVENT as a single body line."
+  (let* ((name   (or (alist-get 'subagentName event) "subagent"))
+         (phase  (or (alist-get 'phase event) ""))
+         (detail (alist-get 'detail event))
+         (glyph  (pcase phase
+                   ("started"   "▶")
+                   ("tool"      "⚙")
+                   ("message"   "…")
+                   ("completed" "✓")
+                   ("failed"    "✗")
+                   (_           "·")))
+         (head   (propertize (format "%s %s" glyph name)
+                             'face (cavemacs-pretty-tool-face name)))
+         (ph     (propertize phase 'face 'cavemacs-pretty-meta-face))
+         (det    (and (stringp detail) (not (string-empty-p detail))
+                      (propertize (truncate-string-to-width
+                                   (replace-regexp-in-string "\n" " " detail)
+                                   200 nil nil "…")
+                                  'face 'cavemacs-tool-args-face))))
+    (if det
+        (format "%s  %s  %s" head ph det)
+      (format "%s  %s" head ph))))
+
+(defun cavemacs-render--on-subagent-progress (event)
+  "Append EVENT as a streamed line into every running task tool card.
+
+The core protocol's `subagent_progress' event carries no
+`toolCallId', so we cannot strictly correlate it to the originating
+Task tool call.  In practice the Task tool is the only thing that
+spawns subagents, so we append the formatted line to every
+currently-running `task' card.  When the Task tool finishes, the
+streamed body is replaced by the final aggregated result as
+usual."
+  (let ((ovs (cavemacs-render--running-task-overlays)))
+    (when ovs
+      (unless cavemacs-render--subagent-logs
+        (setq cavemacs-render--subagent-logs (make-hash-table :test 'equal)))
+      (let ((line (cavemacs-render--format-subagent-line event)))
+        (dolist (ov ovs)
+          (let* ((tid (overlay-get ov 'cavemacs-tool-id))
+                 (prev (and tid (gethash tid cavemacs-render--subagent-logs)))
+                 (next (append prev (list line))))
+            (when tid (puthash tid next cavemacs-render--subagent-logs))
+            (cavemacs-render--rewrite-tool-placeholder
+             ov (string-join next "\n"))))))))
 
 (defun cavemacs-render--format-tool-args-full (args)
   "Return a multi-line pretty-printed string of tool ARGS (alist).

@@ -124,6 +124,42 @@
             (should (string-match-p "\\$0\\.001" text))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-render/subagent-progress-streams-into-task-card ()
+  "`subagent_progress' events append into running `task' tool cards."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "tool_execution_start")
+             (toolCallId . "tc-task")
+             (toolName . "task")
+             (args . ((agent . "explore") (task . "map repo")))))
+          (cavemacs-render-event
+           '((type . "subagent_progress")
+             (subagentId . "explore")
+             (subagentName . "explore")
+             (phase . "started")
+             (detail . "map repo")))
+          (cavemacs-render-event
+           '((type . "subagent_progress")
+             (subagentId . "explore")
+             (subagentName . "explore")
+             (phase . "tool")
+             (detail . "bash")))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "started" text))
+            (should (string-match-p "tool" text))
+            (should (string-match-p "bash" text)))
+          (cavemacs-render-event
+           '((type . "tool_execution_end")
+             (toolCallId . "tc-task")
+             (toolName . "task")
+             (isError . :json-false)
+             (result . ((output . "FINAL-SUMMARY")))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "FINAL-SUMMARY" text))))
+      (kill-buffer buf))))
+
 (ert-deftest cavemacs-render/tool-update-streams-partial-output ()
   "`tool_execution_update' rewrites placeholder body with partial text.
 Expanding the card while the tool is still running shows live output."
