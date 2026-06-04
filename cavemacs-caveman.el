@@ -561,10 +561,14 @@ NON-INTERACTIVE non-nil to skip the prompt."
 
 (defun cavemacs-caveman--header-segment ()
   "Return the propertized caveman segment for the pretty header.
-Always shows the current level (or \"off\") so users can see at a
-glance whether caveman is active."
+Shows the active skill level (lite/full/ultra/wenyan) when the
+upstream caveman skill is engaged; otherwise shows `system' to
+reflect that the built-in `cavemacs-append-system-prompt'
+microprompt is what's nudging terseness.  There is no `off'
+state -- even with the skill disengaged, the system-prompt
+microprompt is in effect."
   (let* ((l (cavemacs-pretty-state-get :caveman-level))
-         (label (or l "off")))
+         (label (or l "system")))
     (concat "  "
             (propertize (format "⛏ caveman:%s" label)
                         'face 'cavemacs-caveman-header-face
