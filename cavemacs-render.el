@@ -1344,7 +1344,84 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
                  placeholder-beg body-end nil))))
           (cavemacs-render--apply-fringe start (1+ start) 'tool))))))
 
-(defun cavemacs-render--on-tool-update (_event) nil)
+(defun cavemacs-render--on-tool-update (event)
+  "Replace the running-placeholder body with the latest partial output.
+
+The agent fires `tool_execution_update' events as long-running
+tools (most notably the bash tool) stream stdout/stderr.  Each
+event carries `partialResult' in the same shape as a final
+`result'.  We rewrite the placeholder region between
+`cavemacs-placeholder-beg' and `cavemacs-placeholder-end' so an
+expanded card shows the live output as it accumulates, then
+re-register the collapsible block so its body overlay still
+covers the (now larger) region and respects the current
+expand/collapse state."
+  (let* ((tool-id  (alist-get 'toolCallId event))
+         (partial  (alist-get 'partialResult event))
+         (ov       (and tool-id
+                        (gethash tool-id cavemacs-render--tool-overlays))))
+    (when (and ov (overlay-buffer ov)
+               (eq (overlay-get ov 'cavemacs-tool-status) 'running))
+      (let* ((face (or (overlay-get ov 'cavemacs-tool-face)
+                       'cavemacs-pretty-tool-rule-face))
+             (ph-beg (overlay-get ov 'cavemacs-placeholder-beg))
+             (ph-end (overlay-get ov 'cavemacs-placeholder-end))
+             (hdr-beg (overlay-get ov 'cavemacs-header-beg))
+             (hdr-end (overlay-get ov 'cavemacs-header-end))
+             (text (cavemacs-render--render-tool-result partial)))
+        (when (and (markerp ph-beg) (markerp ph-end)
+                   (marker-position ph-beg) (marker-position ph-end)
+                   (stringp text))
+          (with-current-buffer (overlay-buffer ov)
+            (cavemacs-render--at-output
+              (goto-char (marker-position ph-beg))
+              (delete-region (marker-position ph-beg)
+                             (marker-position ph-end))
+              (let* ((body-prefix (propertize
+                                   (concat (cavemacs-pretty-glyph 'box-v) " ")
+                                   'face face
+                                   'cavemacs-rule t))
+                     (trimmed (string-trim-right text))
+                     (lines (if (string-empty-p trimmed)
+                                (list (propertize "running…"
+                                                  'face 'cavemacs-pretty-meta-face))
+                              (split-string trimmed "\n" nil)))
+                     (body (mapconcat (lambda (l) (concat body-prefix l))
+                                      lines "\n"))
+                     (block-id (and tool-id (format "tool:%s" tool-id)))
+                     (body-beg (point)))
+                (insert body)
+                (insert "\n")
+                (let ((body-end (point))
+                      (close (concat
+                              (cavemacs-pretty-glyph 'box-bl)
+                              (make-string 4 (string-to-char
+                                              (cavemacs-pretty-glyph 'box-h)))
+                              " running "
+                              (make-string 4 (string-to-char
+                                              (cavemacs-pretty-glyph 'box-h))))))
+                  (insert (propertize close
+                                      'face face
+                                      'cavemacs-rule t
+                                      'cavemacs-collapse-id block-id
+                                      'keymap cavemacs-render-toggle-map
+                                      'mouse-face 'highlight
+                                      'help-echo "TAB / RET / mouse-1: toggle"))
+                  (insert (propertize "\n"
+                                      'cavemacs-rule t
+                                      'cavemacs-collapse-id block-id
+                                      'keymap cavemacs-render-toggle-map))
+                  (set-marker ph-end (point))
+                  (move-overlay ov (overlay-start ov) (point))
+                  (when (and tool-id
+                             (markerp hdr-beg) (markerp hdr-end)
+                             (marker-position hdr-beg)
+                             (marker-position hdr-end))
+                    (cavemacs-render--register-block
+                     block-id
+                     (marker-position hdr-beg)
+                     (marker-position hdr-end)
+                     body-beg body-end nil)))))))))))
 
 (defun cavemacs-render--format-tool-args-full (args)
   "Return a multi-line pretty-printed string of tool ARGS (alist).

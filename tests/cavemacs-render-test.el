@@ -124,6 +124,47 @@
             (should (string-match-p "\\$0\\.001" text))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-render/tool-update-streams-partial-output ()
+  "`tool_execution_update' rewrites placeholder body with partial text.
+Expanding the card while the tool is still running shows live output."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "tool_execution_start")
+             (toolCallId . "tc-u")
+             (toolName . "bash")
+             (args . ((command . "slow")))))
+          (cavemacs-render-event
+           '((type . "tool_execution_update")
+             (toolCallId . "tc-u")
+             (toolName . "bash")
+             (args . ((command . "slow")))
+             (partialResult . ((content . [((type . "text")
+                                            (text . "line-A\nline-B"))])))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "line-A" text))
+            (should (string-match-p "line-B" text))
+            (should-not (string-match-p "running…" text)))
+          (cavemacs-render-event
+           '((type . "tool_execution_update")
+             (toolCallId . "tc-u")
+             (toolName . "bash")
+             (args . ((command . "slow")))
+             (partialResult . ((content . [((type . "text")
+                                            (text . "line-A\nline-B\nline-C"))])))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "line-C" text)))
+          (cavemacs-render-event
+           '((type . "tool_execution_end")
+             (toolCallId . "tc-u")
+             (toolName . "bash")
+             (isError . :json-false)
+             (result . ((output . "line-A\nline-B\nline-C\nDONE")))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should (string-match-p "DONE" text))))
+      (kill-buffer buf))))
+
 (ert-deftest cavemacs-render/tool-block ()
   (let ((buf (cavemacs-render-test--fresh-buffer)))
     (unwind-protect
