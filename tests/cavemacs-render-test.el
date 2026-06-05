@@ -626,5 +626,50 @@ fall back to showing it raw with the sigil."
             (should-not (string-match-p "Assistant" text))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-render/markdown-heading-face-survives-prose-overlay ()
+  "Heading text must keep a `markdown-header-face-N' face even with
+the prose `variable-pitch' overlay on top.  Regression: the prose
+overlay's `:inherit variable-pitch' was masking heading attributes
+delivered via `:inherit', making H1…H6 indistinguishable from body."
+  (skip-unless (or (featurep 'markdown-mode)
+                   (require 'markdown-mode nil t)))
+  ;; Reset the persistent fontify scratch buffer in case an earlier
+  ;; test created it before `markdown-mode' was on the load path.
+  (when (and cavemacs-render--fontify-scratch-buffer
+             (buffer-live-p cavemacs-render--fontify-scratch-buffer))
+    (kill-buffer cavemacs-render--fontify-scratch-buffer))
+  (setq cavemacs-render--fontify-scratch-buffer nil)
+  (let ((buf (cavemacs-render-test--fresh-buffer))
+        ;; Force the prose overlay path so we exercise the regression.
+        (cavemacs-pretty-variable-pitch t))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-pretty-mode 1)
+          (cavemacs-render-event
+           '((type . "message_start")
+             (message . ((role . "assistant") (content . nil)
+                         (provider . "p") (model . "m")))))
+          (cavemacs-render-event
+           '((type . "message_update")
+             (assistantMessageEvent
+              . ((type . "text_delta") (contentIndex . 0)
+                 (delta . "# H1\n\nbody\n")))))
+          (cavemacs-render-event
+           '((type . "message_end")
+             (message . ((role . "assistant")
+                         (content . (((text . "# H1\n\nbody\n"))))
+                         (provider . "p") (model . "m")))))
+          ;; Find the 'H' of "H1" and confirm a markdown-header face
+          ;; reaches it via either text property or overlay.
+          (goto-char (point-min))
+          (should (re-search-forward "H1" nil t))
+          (let* ((pos (match-beginning 0))
+                 (tp (get-text-property pos 'face))
+                 (ov-faces (mapcar (lambda (o) (overlay-get o 'face))
+                                   (overlays-at pos)))
+                 (all (cons tp ov-faces)))
+            (should (cl-some #'cavemacs-render--markdown-face-p all))))
+      (kill-buffer buf))))
+
 (provide 'cavemacs-render-test)
 ;;; cavemacs-render-test.el ends here

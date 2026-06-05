@@ -1116,8 +1116,67 @@ Code-fence regions inside BEG..END stay `fixed-pitch'."
              cavemacs-pretty-variable-pitch)
     (let ((ov (make-overlay beg end nil t nil)))
       (overlay-put ov 'face 'cavemacs-pretty-prose-face)
+      (overlay-put ov 'priority 0)
       (overlay-put ov 'cavemacs-prose t)
-      (overlay-put ov 'evaporate t))))
+      (overlay-put ov 'evaporate t))
+    ;; The prose overlay's `:inherit variable-pitch' would otherwise mask
+    ;; any text-property face that delivers its attributes via
+    ;; `:inherit' (overlay face merges higher than text-property face).
+    ;; markdown-mode's heading / bold / italic / code / link faces all
+    ;; work that way, so without this loop H1..H6 would render as
+    ;; plain prose — no color, no scaling, no bold.  Re-assert each
+    ;; markdown face run as a higher-priority overlay.
+    (cavemacs-render--reassert-markdown-faces beg end)))
+
+(defconst cavemacs-render--markdown-face-prefixes
+  '("markdown-header-face"
+    "markdown-header-delimiter-face"
+    "markdown-header-rule-face"
+    "markdown-bold-face"
+    "markdown-italic-face"
+    "markdown-strike-through-face"
+    "markdown-inline-code-face"
+    "markdown-code-face"
+    "markdown-pre-face"
+    "markdown-link-face"
+    "markdown-url-face"
+    "markdown-blockquote-face"
+    "markdown-list-face"
+    "markdown-markup-face")
+  "Prefixes of markdown-mode face names whose attributes flow through
+`:inherit' and therefore get masked by the prose overlay.  We
+re-assert them as higher-priority overlays so they actually render.")
+
+(defun cavemacs-render--markdown-face-p (face)
+  "Return non-nil if FACE is a markdown-mode font-lock face.
+FACE may be a symbol or a list of faces (text-property `face')."
+  (cond
+   ((symbolp face)
+    (and face
+         (let ((name (symbol-name face)))
+           (cl-some (lambda (p) (string-prefix-p p name))
+                    cavemacs-render--markdown-face-prefixes))))
+   ((listp face)
+    (cl-some #'cavemacs-render--markdown-face-p face))))
+
+(defun cavemacs-render--reassert-markdown-faces (beg end)
+  "Walk BEG..END and pin each markdown-mode face run as a higher-
+priority overlay so it wins the merge against the prose overlay."
+  (save-excursion
+    (goto-char beg)
+    (let ((pos beg))
+      (while (< pos end)
+        (let* ((next (or (next-single-property-change pos 'face nil end) end))
+               (face (get-text-property pos 'face)))
+          (when (cavemacs-render--markdown-face-p face)
+            (let ((ov (make-overlay pos next nil t nil)))
+              (overlay-put ov 'face face)
+              ;; Beats the prose overlay (priority 0) and the code-block
+              ;; background overlay (no priority set, defaults to nil/0).
+              (overlay-put ov 'priority 100)
+              (overlay-put ov 'cavemacs-md-face t)
+              (overlay-put ov 'evaporate t)))
+          (setq pos next))))))
 
 (defun cavemacs-render--decorate-code-blocks (beg end)
   "Find ``` fenced blocks in BEG..END and add pill + bg + copy button."
