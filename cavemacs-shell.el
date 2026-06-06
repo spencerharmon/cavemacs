@@ -124,24 +124,27 @@ Takes one argument: the project name."
     map)
   "Keymap for `cavemacs-shell-mode'.")
 
-(defcustom cavemacs-shell-markdown-header-scales
-  '((1 . 1.5) (2 . 1.35) (3 . 1.2) (4 . 1.1) (5 . 1.05) (6 . 1.0))
+(defcustom cavemacs-shell-markdown-header-scales nil
   "Per-level scale factors for markdown headings rendered in the chat buffer.
 
-Applied via buffer-local `face-remap-add-relative' on
-`markdown-header-face-N' so other markdown buffers are untouched.
-Set a level to nil (or remove it) to leave that level unchanged."
-  :type '(alist :key-type integer :value-type (choice (const nil) number))
+When non-nil, an alist mapping header level (1..6) to a `:height'
+multiplier applied via buffer-local `face-remap-add-relative' on
+`markdown-header-face-N'.  When nil (the default), headings keep
+markdown-mode's own face definitions, matching how they render in
+ordinary markdown buffers.
+
+The previous default scaled H1 by 1.5× down to H6 by 1.0×, which
+looked comically large in a chat buffer.  Users who want some
+scaling can set this to e.g. `((1 . 1.2) (2 . 1.1))'."
+  :type '(choice (const :tag "No scaling (match markdown-mode)" nil)
+                 (alist :key-type integer
+                        :value-type (choice (const nil) number)))
   :group 'cavemacs)
 
 (defun cavemacs-shell--remap-markdown-header-faces ()
-  "Buffer-locally scale up markdown heading faces.
-
-markdown-mode's default header faces are merely bold; in a chat
-buffer that makes H1…H6 visually indistinguishable from the
-surrounding prose.  Scale them per
-`cavemacs-shell-markdown-header-scales' without leaking the
-change to other buffers."
+  "Buffer-locally scale markdown heading faces per
+`cavemacs-shell-markdown-header-scales'.  No-op when that variable
+is nil, leaving markdown-mode's own faces untouched."
   (require 'markdown-mode nil t)
   (dolist (entry cavemacs-shell-markdown-header-scales)
     (let* ((level (car entry))
