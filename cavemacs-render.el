@@ -1437,6 +1437,8 @@ working across updates."
   (let* ((face (or (overlay-get ov 'cavemacs-tool-face)
                    'cavemacs-pretty-tool-rule-face))
          (tool-id (overlay-get ov 'cavemacs-tool-id))
+         (args    (overlay-get ov 'cavemacs-tool-args))
+         (args-str (cavemacs-render--format-tool-args-full args))
          (ph-beg (overlay-get ov 'cavemacs-placeholder-beg))
          (ph-end (overlay-get ov 'cavemacs-placeholder-end))
          (hdr-beg (overlay-get ov 'cavemacs-header-beg))
@@ -1454,13 +1456,29 @@ working across updates."
                                'cavemacs-rule t))
                  (trimmed (string-trim-right (or text "")))
                  (lines (if (string-empty-p trimmed)
-                            (list (propertize "running…"
+                            (list (propertize "streaming…"
                                               'face 'cavemacs-pretty-meta-face))
                           (split-string trimmed "\n" nil)))
                  (body (mapconcat (lambda (l) (concat body-prefix l))
                                   lines "\n"))
                  (block-id (and tool-id (format "tool:%s" tool-id)))
                  (body-beg (point)))
+            ;; Full input block (e.g. the bash `command' arg) above
+            ;; the streamed output, separated by a horizontal rule.
+            ;; The header line only carries a 120-char summary; users
+            ;; need the full command visible while it's running.
+            (when (and args-str (not (string-empty-p args-str)))
+              (insert (mapconcat (lambda (l) (concat body-prefix l))
+                                 (split-string args-str "\n" nil)
+                                 "\n"))
+              (insert "\n")
+              (let* ((sep-char (string-to-char
+                                (cavemacs-pretty-glyph 'box-h)))
+                     (sep (concat (cavemacs-pretty-glyph 'box-v) " "
+                                  (make-string 8 sep-char))))
+                (insert (propertize sep 'face face 'cavemacs-rule t))
+                (insert "\n"))
+              (setq body-beg (point)))
             (insert body)
             (insert "\n")
             (let ((body-end (point))
@@ -1872,8 +1890,15 @@ then under the project root."
     (or (alist-get 'output result)
         (alist-get 'stdout result)
         (alist-get 'text result)
-        (let ((c (alist-get 'content result)))
-          (and c (cavemacs-render--render-tool-result c)))
+        ;; `content' key present (even if nil / empty list) means this
+        ;; alist follows the {content: [...parts...]} shape; recurse
+        ;; into it (empty -> "") rather than falling through to
+        ;; prin1, which would render the bare key as "((content))".
+        (and (assq 'content result)
+             (let ((c (alist-get 'content result)))
+               (if (or (null c) (equal c []))
+                   ""
+                 (cavemacs-render--render-tool-result c))))
         (let ((print-escape-newlines nil)
               (print-length 64) (print-level 4))
           (prin1-to-string result))))

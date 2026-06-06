@@ -201,6 +201,33 @@ Expanding the card while the tool is still running shows live output."
             (should (string-match-p "DONE" text))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-render/tool-update-empty-content-not-prin1ed ()
+  "Bash fires an initial `tool_execution_update' with `{content: []}'
+before any stdout arrives.  That decodes to the alist `((content))'.
+The placeholder body must render as a streaming hint, NOT the literal
+string `((content))' that `prin1-to-string' would produce."
+  (let ((buf (cavemacs-render-test--fresh-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (cavemacs-render-event
+           '((type . "tool_execution_start")
+             (toolCallId . "tc-empty")
+             (toolName . "bash")
+             (args . ((command . "sleep 1")))))
+          (cavemacs-render-event
+           '((type . "tool_execution_update")
+             (toolCallId . "tc-empty")
+             (toolName . "bash")
+             (args . ((command . "sleep 1")))
+             ;; `content' present but empty (decoded from `[]').
+             (partialResult . ((content)))))
+          (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+            (should-not (string-match-p "((content))" text))
+            ;; Full command must be visible in the streaming body too,
+            ;; not just truncated in the header summary.
+            (should (string-match-p "sleep 1" text))))
+      (kill-buffer buf))))
+
 (ert-deftest cavemacs-render/tool-block ()
   (let ((buf (cavemacs-render-test--fresh-buffer)))
     (unwind-protect
