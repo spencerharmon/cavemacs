@@ -37,7 +37,13 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'markdown-mode nil t)
+;; Hard require: markdown-mode is a Package-Requires dep, so it must
+;; be present at load time. The old soft-require silently degraded
+;; assistant-message rendering to plain unfontified prose (literal
+;; '#' instead of scaled, colored headings) on any buffer rendered
+;; before straight finished building markdown-mode. Fail loud here
+;; instead of producing a permanently broken chat history.
+(require 'markdown-mode)
 (require 'diff-mode)
 (require 'cavemacs-pretty)
 
@@ -744,7 +750,32 @@ toolResult messages by `toolCallId'."
                            (details . ,(alist-get 'details msg))))
             (isError    . ,(alist-get 'isError msg)))))
         (_ nil))))
-  (cavemacs-pretty-state-put :status 'idle))
+  (cavemacs-pretty-state-put :status 'idle)
+  ;; Belt-and-braces: walk every finalized assistant overlay and force
+  ;; a non-streaming repaint so markdown fontification runs even if
+  ;; the per-message_end repaint above hit a bad code path (stale
+  ;; markdown-mode, etc.). Cheap relative to the LLM round-trip we
+  ;; just replayed.
+  (cavemacs-render-refontify-buffer))
+
+(defun cavemacs-render-refontify-buffer ()
+  "Re-render every assistant overlay in the current buffer with
+markdown fontification enabled. Use this to repair chat buffers
+whose messages were originally rendered before markdown-mode was
+loaded (literal '#' headings, no scaling, no color)."
+  (interactive)
+  (let ((count 0))
+    (dolist (ov (overlays-in (point-min) (point-max)))
+      (when (and (eq (overlay-get ov 'cavemacs-role) 'assistant)
+                 (overlay-get ov 'cavemacs-text)
+                 (overlay-get ov 'cavemacs-body-start))
+        (let ((inhibit-read-only t))
+          (cavemacs-render--repaint-assistant ov nil))
+        (cl-incf count)))
+    (when (called-interactively-p 'interactive)
+      (message "cavemacs: refontified %d assistant message%s"
+               count (if (= count 1) "" "s")))
+    count))
 
 ;; -----------------------------------------------------------------------------
 ;; Per-event handlers
@@ -1053,9 +1084,7 @@ messages.  A final non-streaming repaint runs on `text_end' /
                      (rendered
                       (if (and (not is-error)
                                (not streaming)
-                               cavemacs-render-fontify-markdown
-                               (or (featurep 'markdown-mode)
-                                   (require 'markdown-mode nil t)))
+                               cavemacs-render-fontify-markdown)
                           (cavemacs-render--fontify-markdown-string pre)
                         pre)))
                 (insert (cavemacs-render--indent-body rendered face)))
@@ -1066,9 +1095,7 @@ messages.  A final non-streaming repaint runs on `text_end' /
               (put-text-property text-start (point) 'face
                                  'cavemacs-error-face))
              ((and (not streaming)
-                   cavemacs-render-fontify-markdown
-                   (or (featurep 'markdown-mode)
-                       (require 'markdown-mode nil t)))
+                   cavemacs-render-fontify-markdown)
               (cavemacs-render--decorate-code-blocks text-start (point))
               (cavemacs-render--apply-variable-pitch text-start (point))))
             (move-overlay ov (overlay-start ov) (point)))))))))
@@ -1091,14 +1118,33 @@ session instead of once per assistant message.")
     buf))
 
 (defun cavemacs-render--fontify-markdown-string (text)
-  "Return TEXT with markdown-mode font-lock faces applied as text properties."
-  (condition-case _
+  "Return TEXT with markdown-mode font-lock faces applied as text properties.
+
+Errors during fontification are logged via `message' and the original
+TEXT is returned unchanged. We deliberately avoid silent swallowing:
+the previous behaviour caused the entire chat history to render as
+plain prose (literal '#' headings, no scaling, no color) whenever a
+first-render error left the user's buffers permanently unfontified.
+
+Locally re-enables `inhibit-modification-hooks' for the scratch
+buffer. Callers (notably `cavemacs-render--repaint-assistant' via
+`cavemacs-render--with-fast-insert') run with hooks disabled to
+keep stream rendering cheap, but markdown-mode's font-lock relies
+on `syntax-propertize' which is driven by `after-change-functions'.
+Without this rebind, font-lock-ensure runs against a scratch buffer
+whose syntax-table state was never updated → ATX headings (and
+several other markdown constructs) silently fail to fontify and the
+buffer renders as literal `#`-prefixed prose."
+  (condition-case err
       (with-current-buffer (cavemacs-render--fontify-scratch)
-        (erase-buffer)
-        (insert text)
-        (font-lock-ensure (point-min) (point-max))
-        (buffer-string))
-    (error text)))
+        (let ((inhibit-modification-hooks nil))
+          (erase-buffer)
+          (insert text)
+          (font-lock-ensure (point-min) (point-max))
+          (buffer-string)))
+    (error
+     (message "cavemacs-render: markdown fontify failed: %S" err)
+     text)))
 
 (defun cavemacs-render--fontify-markdown (beg end)
   "Apply markdown font-lock to the region BEG..END (in-place)."

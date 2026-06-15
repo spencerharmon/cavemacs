@@ -125,7 +125,7 @@ Takes one argument: the project name."
   "Keymap for `cavemacs-shell-mode'.")
 
 (defcustom cavemacs-shell-markdown-header-scales
-  '((1 . 1.6) (2 . 1.4) (3 . 1.2) (4 . 1.1) (5 . 1.0) (6 . 1.0))
+  '((1 . 1.25) (2 . 1.15) (3 . 1.1) (4 . 1.05) (5 . 1.0) (6 . 1.0))
   "Per-level scale factors for markdown headings rendered in the chat buffer.
 
 Alist mapping header level (1..6) to a `:height' multiplier
