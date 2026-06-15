@@ -76,6 +76,15 @@ Restored when the user navigates past the most recent entry.")
 (defvar-local cavemacs-shell--session-state nil
   "Last-known session state alist from a `get_state' response.")
 
+(defvar-local cavemacs-shell--session-file nil
+  "Absolute path to the on-disk session JSONL backing this buffer.
+
+Set when the buffer is resumed from a session file, or resolved
+from the sessionId in the first `get_state' response when caveman
+auto-created a fresh session.  Used by `cavemacs-shell-restart'
+to resume the same session (and thus replay context) after a
+subprocess respawn.")
+
 (defvar-local cavemacs-shell--mode-line-info ""
   "Modeline tail string showing state, cost, etc.")
 
@@ -330,6 +339,31 @@ Layout (top to bottom):
 ;; Process lifecycle
 ;; -----------------------------------------------------------------------------
 
+(defvar cavemacs-session-dir
+  (expand-file-name "~/.cave/agent/sessions/")
+  "Forward-declared here so `cavemacs-shell--find-session-file-by-id'
+can be unit-tested without pulling in `cavemacs-session.el' (which
+would create a load cycle).  The canonical definition lives in
+`cavemacs-session.el' as a `defcustom'; both definitions agree on
+the default value so load order does not matter.")
+
+(defun cavemacs-shell--find-session-file-by-id (session-id project-root)
+  "Return absolute path of the session file for SESSION-ID under PROJECT-ROOT.
+
+Mirrors caveman's `getDefaultSessionDir' encoding:
+  <cavemacs-session-dir>/--<cwd-with-slashes-as-dashes>--/*_<id>.jsonl
+Returns nil if no matching file exists."
+  (when (and (stringp session-id) (not (string-empty-p session-id))
+             (stringp project-root))
+    (let* ((agent-dir (file-name-as-directory cavemacs-session-dir))
+           (cwd (directory-file-name (expand-file-name project-root)))
+           (stripped (replace-regexp-in-string "\\`[/\\\\]" "" cwd))
+           (safe (replace-regexp-in-string "[/\\\\:]" "-" stripped))
+           (dir (expand-file-name (format "--%s--" safe) agent-dir))
+           (pattern (format "_%s\\.jsonl\\'" (regexp-quote session-id))))
+      (when (file-directory-p dir)
+        (car (directory-files dir t pattern t))))))
+
 (cl-defun cavemacs-shell--start-process (&key session-file)
   "Spawn caveman, attach hooks, request initial state."
   (let* ((binary (cavemacs--binary))
@@ -341,7 +375,8 @@ Layout (top to bottom):
                                    :args args
                                    :environment env
                                    :owner-buffer (current-buffer))))
-    (setq cavemacs-shell--conn conn)
+    (setq cavemacs-shell--conn conn
+          cavemacs-shell--session-file session-file)
     (cavemacs-rpc-add-event-hook
      conn (cavemacs-shell--make-event-router (current-buffer)))
     (when (fboundp 'cavemacs-tools-install-ui-handler)
@@ -397,7 +432,16 @@ Layout (top to bottom):
         (let* ((data cavemacs-shell--session-state)
                (model (alist-get 'model data))
                (provider (and model (alist-get 'provider model)))
-               (mid (and model (alist-get 'id model))))
+               (mid (and model (alist-get 'id model)))
+               (sid (alist-get 'sessionId data)))
+          ;; If we don't yet know the on-disk session file (fresh
+          ;; session auto-created by caveman), resolve it from the
+          ;; sessionId now so a later restart can resume the same
+          ;; session and replay context.
+          (unless cavemacs-shell--session-file
+            (setq cavemacs-shell--session-file
+                  (cavemacs-shell--find-session-file-by-id
+                   sid cavemacs-shell--project-root)))
           (when (and provider (stringp provider) (not (string-empty-p provider)))
             (cavemacs-pretty-state-put :provider provider))
           (when (and mid (stringp mid) (not (string-empty-p mid)))
@@ -432,7 +476,13 @@ shell buffer itself is killed so users can inspect the failure."
   "Restart caveman in this buffer with the same args.
 
 Use this after \"command exited abnormally\".  Keeps the rendered
-history in the buffer; spawns a fresh subprocess and re-attaches."
+history in the buffer; spawns a fresh subprocess and re-attaches.
+
+When the buffer is backed by an on-disk session (either resumed
+that way, or auto-created by caveman and resolved from the first
+`get_state' response), the new subprocess is started with
+`--session <path>' so prior context is replayed via `get_messages'
+and the LLM sees the full transcript on its next turn."
   (interactive)
   (when (and cavemacs-shell--conn
              (cavemacs-rpc-live-p cavemacs-shell--conn))
@@ -440,8 +490,12 @@ history in the buffer; spawns a fresh subprocess and re-attaches."
   (setq cavemacs-shell--conn nil)
   (cavemacs-pretty-state-put :status 'idle)
   (cavemacs-shell--set-mode-info "restarting…")
-  (cavemacs-shell--start-process :session-file nil)
-  (message "cavemacs: restarting caveman"))
+  (let ((session-file cavemacs-shell--session-file))
+    (cavemacs-shell--start-process :session-file session-file)
+    (message "cavemacs: restarting caveman%s"
+             (if session-file
+                 (format " (resuming %s)" (file-name-nondirectory session-file))
+               ""))))
 
 (defun cavemacs-shell--require-live-conn ()
   "Signal a helpful error if the RPC connection is dead.

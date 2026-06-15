@@ -229,5 +229,30 @@ Regression: previously only agent_end cleared it."
                                    (point-min) (point-max)))))
       (kill-buffer buf))))
 
+(ert-deftest cavemacs-shell/find-session-file-by-id-encodes-cwd ()
+  "`cavemacs-shell--find-session-file-by-id' locates files using
+caveman's `--<cwd-with-slashes-as-dashes>--' directory encoding
+and matches the trailing `_<id>.jsonl' suffix."
+  (let* ((tmp (file-name-as-directory (make-temp-file "cavemacs-sessions-" t)))
+         (cavemacs-session-dir tmp)
+         (root "/tmp/cm-test/proj/")
+         (safe "--tmp-cm-test-proj--")
+         (dir (expand-file-name safe tmp))
+         (sid "abc123-def4-5678-90ab-cdef01234567")
+         (path (expand-file-name
+                (format "2026-06-14T00-00-00-000Z_%s.jsonl" sid) dir)))
+    (unwind-protect
+        (progn
+          (make-directory dir t)
+          (with-temp-file path (insert "{}\n"))
+          (should (equal path
+                         (cavemacs-shell--find-session-file-by-id
+                          sid root)))
+          (should (null (cavemacs-shell--find-session-file-by-id
+                         "no-such-id" root)))
+          (should (null (cavemacs-shell--find-session-file-by-id
+                         sid "/tmp/other/proj/"))))
+      (delete-directory tmp t))))
+
 (provide 'cavemacs-shell-test)
 ;;; cavemacs-shell-test.el ends here
