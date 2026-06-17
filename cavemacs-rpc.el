@@ -76,6 +76,19 @@
   (next-id 0)        ; monotonic counter for request ids
   (owner-buffer nil)); buffer this conn belongs to, for advisory back-ref
 
+(defvar cavemacs-rpc--connections nil
+  "Live `cavemacs-rpc-conn' objects that need shutdown before Emacs exits.")
+
+(defun cavemacs-rpc--register-conn (conn)
+  "Track CONN for global Emacs shutdown cleanup."
+  (cl-pushnew conn cavemacs-rpc--connections :test #'eq)
+  conn)
+
+(defun cavemacs-rpc--unregister-conn (conn)
+  "Stop tracking CONN for global Emacs shutdown cleanup."
+  (setq cavemacs-rpc--connections (delq conn cavemacs-rpc--connections))
+  conn)
+
 ;; -----------------------------------------------------------------------------
 ;; ID generation
 ;; -----------------------------------------------------------------------------
@@ -233,6 +246,7 @@ cancelled reply so caveman does not hang forever."
   "Process sentinel for the caveman RPC subprocess."
   (let ((conn (process-get proc 'cavemacs-rpc-conn)))
     (when (and conn (memq (process-status proc) '(exit signal closed failed)))
+      (cavemacs-rpc--unregister-conn conn)
       ;; Reject any still-pending callbacks so callers don't hang.
       (maphash
        (lambda (id cb)
@@ -312,7 +326,7 @@ OWNER-BUFFER is the cavemacs shell buffer that owns the connection."
                 :owner-buffer owner-buffer)))
     (process-put proc 'cavemacs-rpc-conn conn)
     (process-put stderr-proc 'cavemacs-rpc-conn conn)
-    conn))
+    (cavemacs-rpc--register-conn conn)))
 
 (defun cavemacs-rpc-live-p (conn)
   "Return non-nil if CONN's subprocess is still running."
@@ -337,9 +351,21 @@ nil explicitly when tearing down for good."
         (accept-process-output (cavemacs-rpc-conn-process conn) 0.1))
       (when (cavemacs-rpc-live-p conn)
         (kill-process (cavemacs-rpc-conn-process conn)))))
+  (when conn
+    (cavemacs-rpc--unregister-conn conn))
   (unless keep-stderr
     (when (and conn (buffer-live-p (cavemacs-rpc-conn-stderr-buffer conn)))
       (kill-buffer (cavemacs-rpc-conn-stderr-buffer conn)))))
+
+(defun cavemacs-rpc-stop-all ()
+  "Stop every tracked caveman RPC subprocess before Emacs exits."
+  (interactive)
+  (dolist (conn (copy-sequence cavemacs-rpc--connections))
+    (ignore-errors
+      (cavemacs-rpc-stop conn nil)))
+  (setq cavemacs-rpc--connections nil))
+
+(add-hook 'kill-emacs-hook #'cavemacs-rpc-stop-all)
 
 (defun cavemacs-rpc-stderr-buffer (conn)
   "Return the live stderr buffer for CONN, or nil."

@@ -41,6 +41,26 @@
                 :ui-handlers nil)))
     conn))
 
+(ert-deftest cavemacs-rpc/kill-emacs-hook-installed ()
+  (should (memq #'cavemacs-rpc-stop-all kill-emacs-hook)))
+
+(ert-deftest cavemacs-rpc/stop-all-stops-registered-conns ()
+  (let ((cavemacs-rpc--connections nil)
+        (c1 (cavemacs-rpc-test--fake-conn))
+        (c2 (cavemacs-rpc-test--fake-conn))
+        stopped)
+    (cavemacs-rpc--register-conn c1)
+    (cavemacs-rpc--register-conn c2)
+    (cl-letf (((symbol-function 'cavemacs-rpc-stop)
+               (lambda (conn keep-stderr)
+                 (push (list conn keep-stderr) stopped))))
+      (cavemacs-rpc-stop-all))
+    (should (null cavemacs-rpc--connections))
+    (should (= 2 (length stopped)))
+    (should (memq c1 (mapcar #'car stopped)))
+    (should (memq c2 (mapcar #'car stopped)))
+    (should (equal (mapcar #'cadr stopped) '(nil nil)))))
+
 (defun cavemacs-rpc-test--feed (conn chunks)
   "Feed CHUNKS (a list of strings) through CONN's filter logic.
 
